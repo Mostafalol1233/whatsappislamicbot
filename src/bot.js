@@ -17,17 +17,10 @@ const config = {
   nightlyAzkarTime: process.env.NIGHTLY_AZKAR_TIME || '21:30',
   quranPdfTime: process.env.QURAN_PDF_TIME || '10:00',
   dailyJuzTime: process.env.DAILY_JUZ_TIME || '08:00',
-
-  // Requested audio names support
-  adhan019Path: process.env.ADHAN_019_PATH || process.env.ADHAN_16_PATH || './assets/019--1.mp3',
-  adhan052Path: process.env.ADHAN_052_PATH || process.env.ADHAN_52_PATH || './assets/052-.mp3',
-  dua046Path: process.env.DUA_046_PATH || './assets/046--_up_by_muslem.mp3',
-
-  adhan019Url: process.env.ADHAN_019_URL || process.env.ADHAN_16_URL || '',
-  adhan052Url: process.env.ADHAN_052_URL || process.env.ADHAN_52_URL || '',
-  dua046Url: process.env.DUA_046_URL || '',
-
-  ishaDuaDelayMinutes: Number(process.env.ISHA_DUA_DELAY_MINUTES || 10),
+  adhan16Path: process.env.ADHAN_16_PATH || './assets/adhan16.mp3',
+  adhan52Path: process.env.ADHAN_52_PATH || './assets/adhan52.mp3',
+  adhan16Url: process.env.ADHAN_16_URL || '',
+  adhan52Url: process.env.ADHAN_52_URL || '',
   quranPdfUrl: process.env.QURAN_PDF_URL || 'https://www.searchtruth.com/pdf/Holy-Quran-Arabic-Writing-1.pdf',
   enableSolarAthkar: process.env.ENABLE_SOLAR_ATHKAR !== 'false'
 };
