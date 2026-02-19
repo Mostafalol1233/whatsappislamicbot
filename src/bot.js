@@ -1,8 +1,6 @@
 import fs from 'fs';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
-import qrcode from 'qrcode-terminal';
-import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import { athkar, commandMenu, duas, formatAthkar, formatPrayerInfo, istighfarList, prayerNameArabic } from './content.js';
 import { addTarget, getStore, getTarget, removeTarget, updateTarget } from './store.js';
 import { formatPrayerTimes, getDailyJuzNumber, getNextPrayer, getPrayerTimes, isPrayerNow } from './prayer.js';
@@ -17,81 +15,89 @@ const config = {
   nightlyAzkarTime: process.env.NIGHTLY_AZKAR_TIME || '21:30',
   quranPdfTime: process.env.QURAN_PDF_TIME || '10:00',
   dailyJuzTime: process.env.DAILY_JUZ_TIME || '08:00',
-  adhan16Path: process.env.ADHAN_16_PATH || './assets/adhan16.mp3',
-  adhan52Path: process.env.ADHAN_52_PATH || './assets/adhan52.mp3',
-  adhan16Url: process.env.ADHAN_16_URL || '',
-  adhan52Url: process.env.ADHAN_52_URL || '',
+  adhan019Path: process.env.ADHAN_019_PATH || './assets/019--1.mp3',
+  adhan052Path: process.env.ADHAN_052_PATH || './assets/052-.mp3',
+  dua046Path: process.env.DUA_046_PATH || './assets/046--_up_by_muslem.mp3',
+  adhan019Url: process.env.ADHAN_019_URL || '',
+  adhan052Url: process.env.ADHAN_052_URL || '',
+  dua046Url: process.env.DUA_046_URL || '',
+  ishaDuaDelayMinutes: Number(process.env.ISHA_DUA_DELAY_MINUTES || 10),
   quranPdfUrl: process.env.QURAN_PDF_URL || 'https://www.searchtruth.com/pdf/Holy-Quran-Arabic-Writing-1.pdf',
-  enableSolarAthkar: process.env.ENABLE_SOLAR_ATHKAR !== 'false'
+  enableSolarAthkar: process.env.ENABLE_SOLAR_ATHKAR !== 'false',
+  skipWhatsappInit: process.env.SKIP_WHATSAPP_INIT === 'true',
+  authFolder: process.env.BAILEYS_AUTH_FOLDER || 'auth_info_baileys'
 };
 
-const client = new Client({ authStrategy: new LocalAuth(), puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] } });
 const notified = new Set();
+const logger = { info: console.log, warn: console.warn, error: console.error };
+let sock;
+let started = false;
+let baileysApi;
 
 const toCron = (hhmm) => {
   const [h, m] = hhmm.split(':');
   return `${m} ${h} * * *`;
 };
 
-async function broadcastTo(targets, payload, options = undefined) {
-  for (const t of targets) {
-    await client.sendMessage(t.id, payload, options);
-  }
+async function loadBaileysApi() {
+  if (baileysApi) return baileysApi;
+  const mod = await import('@whiskeysockets/baileys');
+  baileysApi = {
+    makeWASocket: mod.default,
+    DisconnectReason: mod.DisconnectReason,
+    fetchLatestBaileysVersion: mod.fetchLatestBaileysVersion,
+    useMultiFileAuthState: mod.useMultiFileAuthState,
+    makeInMemoryStore: mod.makeInMemoryStore
+  };
+  return baileysApi;
 }
 
-async function buildMediaFromPathOrUrl(path, url) {
-  if (path && fs.existsSync(path)) return MessageMedia.fromFilePath(path);
-  if (url) return MessageMedia.fromUrl(url, { unsafeMime: true });
+async function sendText(jid, text) {
+  if (!sock) return;
+  await sock.sendMessage(jid, { text });
+}
+
+async function broadcastTo(targets, text) {
+  for (const t of targets) await sendText(t.id, text);
+}
+
+async function loadAudioBuffer(path, url) {
+  if (path && fs.existsSync(path)) return fs.readFileSync(path);
+  if (url) {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return Buffer.from(await response.arrayBuffer());
+  }
   return null;
 }
 
-async function buildAdhanMedia(prayerKey) {
-  const use052 = prayerKey === 'Fajr' || prayerKey === 'Maghrib';
-  return buildMediaFromPathOrUrl(
-    use052 ? config.adhan052Path : config.adhan019Path,
-    use052 ? config.adhan052Url : config.adhan019Url
-  );
-}
-
-async function buildIshaDuaMedia() {
-  return buildMediaFromPathOrUrl(config.dua046Path, config.dua046Url);
+async function sendAudio(jid, buffer, caption) {
+  if (!sock || !buffer) return;
+  if (caption) await sendText(jid, caption);
+  await sock.sendMessage(jid, { audio: buffer, mimetype: 'audio/mpeg', ptt: true });
 }
 
 function getActiveTargets(filter = () => true) {
   return getStore().targets.filter((t) => t.isActive && filter(t));
 }
 
-async function sendIshaDuaAudio(target) {
-  const media = await buildIshaDuaMedia();
-  if (!media) return;
-
-  await client.sendMessage(
-    target.id,
-    media,
-    { sendAudioAsVoice: true, caption: '🤲 دعاء بعد العشاء (046--_up_by_muslem.mp3)' }
-  );
+function getAdhanFileName(prayerKey) {
+  return prayerKey === 'Fajr' || prayerKey === 'Maghrib' ? '052-.mp3' : '019--1.mp3';
 }
 
 async function notifyPrayerForTarget(target, prayerKey, time) {
   const ar = prayerNameArabic[prayerKey] || prayerKey;
-  const msg = `📢 *حان الآن موعد أذان ${ar} في ${target.city}* 🕌\n⏰ الوقت: ${time}\n━━━━━━━━━━━━━━━━━━\n${formatPrayerInfo(prayerKey)}\n━━━━━━━━━━━━━━━━━━\n🤲 لا تنسوا الدعاء عند الأذان`;
-  await client.sendMessage(target.id, msg);
+  await sendText(target.id, `📢 *حان الآن موعد أذان ${ar} في ${target.city}* 🕌\n⏰ الوقت: ${time}\n━━━━━━━━━━━━━━━━━━\n${formatPrayerInfo(prayerKey)}\n━━━━━━━━━━━━━━━━━━\n🤲 لا تنسوا الدعاء عند الأذان`);
 
-  const media = await buildAdhanMedia(prayerKey);
-  if (media) {
-    const audioName = prayerKey === 'Fajr' || prayerKey === 'Maghrib' ? '052-.mp3' : '019--1.mp3';
-    await client.sendMessage(target.id, media, { sendAudioAsVoice: true, caption: `🎧 أذان ${ar} (${audioName})` });
-  }
+  const use052 = prayerKey === 'Fajr' || prayerKey === 'Maghrib';
+  const adhanBuffer = await loadAudioBuffer(use052 ? config.adhan052Path : config.adhan019Path, use052 ? config.adhan052Url : config.adhan019Url);
+  await sendAudio(target.id, adhanBuffer, `🎧 أذان ${ar} (${getAdhanFileName(prayerKey)})`);
 
-  if (target.enableAthkar) {
-    setTimeout(async () => {
-      await client.sendMessage(target.id, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer));
-    }, 15 * 60 * 1000);
-  }
-
+  if (target.enableAthkar) setTimeout(() => sendText(target.id, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer)), 15 * 60 * 1000);
   if (prayerKey === 'Isha') {
     setTimeout(async () => {
-      await sendIshaDuaAudio(target);
+      const duaBuffer = await loadAudioBuffer(config.dua046Path, config.dua046Url);
+      await sendAudio(target.id, duaBuffer, '🤲 دعاء بعد العشاء (046--_up_by_muslem.mp3)');
     }, config.ishaDuaDelayMinutes * 60 * 1000);
   }
 }
@@ -99,9 +105,7 @@ async function notifyPrayerForTarget(target, prayerKey, time) {
 async function checkPrayerAlerts() {
   const now = new Date();
   const dateKey = now.toISOString().slice(0, 10);
-  const targets = getActiveTargets((t) => t.enablePrayer);
-
-  for (const target of targets) {
+  for (const target of getActiveTargets((t) => t.enablePrayer)) {
     const times = await getPrayerTimes({ city: target.city, country: target.country, method: config.method });
     for (const prayer of ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']) {
       const mark = `${dateKey}-${target.id}-${prayer}`;
@@ -115,160 +119,168 @@ async function checkPrayerAlerts() {
 
 async function checkSolarAthkarAlerts() {
   if (!config.enableSolarAthkar) return;
-
   const now = new Date();
   const dateKey = now.toISOString().slice(0, 10);
-  const targets = getActiveTargets((t) => t.enableAthkar);
-
-  for (const target of targets) {
+  for (const target of getActiveTargets((t) => t.enableAthkar)) {
     const times = await getPrayerTimes({ city: target.city, country: target.country, method: config.method });
-
     const sunriseMark = `${dateKey}-${target.id}-sunrise-athkar`;
     if (!notified.has(sunriseMark) && isPrayerNow(times.Sunrise, now)) {
-      await client.sendMessage(target.id, `🌅 *حان وقت الشروق*\n${formatAthkar('أذكار الصباح', athkar.morning)}`);
+      await sendText(target.id, `🌅 *حان وقت الشروق*\n${formatAthkar('أذكار الصباح', athkar.morning)}`);
       notified.add(sunriseMark);
     }
-
     const sunsetMark = `${dateKey}-${target.id}-sunset-athkar`;
     if (!notified.has(sunsetMark) && isPrayerNow(times.Maghrib, now)) {
-      await client.sendMessage(target.id, `🌇 *حان وقت الغروب*\n${formatAthkar('أذكار المساء', athkar.evening)}`);
+      await sendText(target.id, `🌇 *حان وقت الغروب*\n${formatAthkar('أذكار المساء', athkar.evening)}`);
       notified.add(sunsetMark);
-    }
-  }
-
-  if (notified.size > 350) {
-    for (const entry of [...notified]) {
-      if (!entry.startsWith(dateKey)) notified.delete(entry);
     }
   }
 }
 
 async function sendQuranPdf() {
-  const targets = getActiveTargets((t) => t.enableQuran);
-  const media = await MessageMedia.fromUrl(config.quranPdfUrl, { unsafeMime: true, filename: 'Holy-Quran.pdf' });
-  for (const t of targets) {
-    await client.sendMessage(t.id, media, { caption: '📖 *مصحف المدينة المنورة*\nاجعل لك ورداً يومياً من القرآن 🌙', sendMediaAsDocument: true });
+  for (const t of getActiveTargets((x) => x.enableQuran)) {
+    await sock.sendMessage(t.id, { document: { url: config.quranPdfUrl }, fileName: 'Holy-Quran.pdf', mimetype: 'application/pdf', caption: '📖 *مصحف المدينة المنورة*\nاجعل لك ورداً يومياً من القرآن 🌙' });
   }
 }
 
 async function sendDailyJuz() {
   const juz = getDailyJuzNumber(new Date());
-  const targets = getActiveTargets((t) => t.enableQuran);
-  const text = `📚 *ورد اليوم الرمضاني*\nالجزء: ${juz}\nالرابط: https://quran.com/juz/${juz}\n\nتقبل الله طاعتكم.`;
-  await broadcastTo(targets, text);
+  await broadcastTo(getActiveTargets((t) => t.enableQuran), `📚 *ورد اليوم الرمضاني*\nالجزء: ${juz}\nالرابط: https://quran.com/juz/${juz}`);
 }
 
 async function sendRamadanStatus() {
-  const targets = getActiveTargets((t) => t.enableRamadan);
-  for (const t of targets) {
+  for (const t of getActiveTargets((x) => x.enableRamadan)) {
     const times = await getPrayerTimes({ city: t.city, country: t.country, method: config.method });
-    const msg = `🌙 *تذكير رمضاني*\n⏲️ الإمساك: ${times.Imsak || '-'}\n🌅 الشروق: ${times.Sunrise || '-'}\n🌇 الإفطار (المغرب): ${times.Maghrib}\n🤲 اللهم بلغنا رمضان وتقبل منا.`;
-    await client.sendMessage(t.id, msg);
+    await sendText(t.id, `🌙 *تذكير رمضاني*\n⏲️ الإمساك: ${times.Imsak || '-'}\n🌅 الشروق: ${times.Sunrise || '-'}\n🌇 الإفطار: ${times.Maghrib}`);
   }
 }
 
 function formatStatus(target) {
-  if (!target) return 'هذه الدردشة غير مرتبطة. استخدم >connect أولاً.';
+  if (!target) return 'هذه الدردشة غير مرتبطة. استخدم .ربط أولاً.';
   return `⚙️ *حالة الدردشة*\nالاسم: ${target.name}\nالمدينة: ${target.city}, ${target.country}\nالصلاة: ${target.enablePrayer ? '✅' : '❌'}\nالأذكار: ${target.enableAthkar ? '✅' : '❌'}\nالقرآن: ${target.enableQuran ? '✅' : '❌'}\nرمضان: ${target.enableRamadan ? '✅' : '❌'}`;
 }
 
-async function handleServicesCommand(message, body) {
-  const target = getTarget(message.from);
-  if (body === '.اوامر') return client.sendMessage(message.from, commandMenu);
-  if (body === '.صباح') return client.sendMessage(message.from, formatAthkar('أذكار الصباح', athkar.morning));
-  if (body === '.مساء') return client.sendMessage(message.from, formatAthkar('أذكار المساء', athkar.evening));
-  if (body === '.صلاة') return client.sendMessage(message.from, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer));
-  if (body === '.نوم') return client.sendMessage(message.from, formatAthkar('أذكار النوم', athkar.sleep));
-  if (body === '.ادعية') return client.sendMessage(message.from, `🤲 *أدعية مختارة*\n` + duas.map((d) => `• ${d}`).join('\n'));
-  if (body === '.استغفار') return client.sendMessage(message.from, `🕊️ *مجلس استغفار*\n` + istighfarList.map((d) => `• ${d}`).join('\n'));
-  if (body === '.ملفات') return client.sendMessage(message.from, '📁 ضع الملفات داخل assets/ بالأسماء التالية:\n• 019--1.mp3 (لكل الصلوات)\n• 052-.mp3 (للفجر والمغرب)\n• 046--_up_by_muslem.mp3 (دعاء بعد العشاء)');
+const getMessageText = (m) => m?.conversation || m?.extendedTextMessage?.text || '';
 
-  const juz = getDailyJuzNumber(new Date());
-  if (body === '.ورد') return client.sendMessage(message.from, `📚 ورد اليوم: الجزء ${juz}\nhttps://quran.com/juz/${juz}`);
+async function handleServicesCommand(jid, body) {
+  const target = getTarget(jid);
+  if (body === '.اوامر') return sendText(jid, commandMenu);
+  if (body === '.صباح') return sendText(jid, formatAthkar('أذكار الصباح', athkar.morning));
+  if (body === '.مساء') return sendText(jid, formatAthkar('أذكار المساء', athkar.evening));
+  if (body === '.صلاة') return sendText(jid, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer));
+  if (body === '.نوم') return sendText(jid, formatAthkar('أذكار النوم', athkar.sleep));
+  if (body === '.ادعية') return sendText(jid, `🤲 *أدعية مختارة*\n${duas.map((d) => `• ${d}`).join('\n')}`);
+  if (body === '.استغفار') return sendText(jid, `🕊️ *مجلس استغفار*\n${istighfarList.map((d) => `• ${d}`).join('\n')}`);
+  if (body === '.ملفات') return sendText(jid, '📁 assets/:\n• 019--1.mp3\n• 052-.mp3\n• 046--_up_by_muslem.mp3');
+  if (body === '.ابدأ') {
+    if (!getTarget(jid)) addTarget(jid, 'Direct Chat', config.city, config.country);
+    return sendText(jid, '✅ تم تهيئة الدردشة. استخدم .حالة و .مدينة|City|Country ثم .اوامر');
+  }
+  if (body === '.ورد') {
+    const juz = getDailyJuzNumber(new Date());
+    return sendText(jid, `📚 ورد اليوم: الجزء ${juz}\nhttps://quran.com/juz/${juz}`);
+  }
 
   const city = target?.city || config.city;
   const country = target?.country || config.country;
-
-  if (body === '.مواقيت') {
-    const times = await getPrayerTimes({ city, country, method: config.method });
-    return client.sendMessage(message.from, formatPrayerTimes(times, city));
-  }
+  if (body === '.مواقيت') return sendText(jid, formatPrayerTimes(await getPrayerTimes({ city, country, method: config.method }), city));
   if (body === '.live') {
-    const times = await getPrayerTimes({ city, country, method: config.method });
-    const next = getNextPrayer(times);
-    return client.sendMessage(message.from, `🟢 *الحالة المباشرة*\nالصلاة القادمة: ${prayerNameArabic[next.name]}\nالوقت: ${next.time}\nالمتبقي: ${next.remainingText}`);
+    const next = getNextPrayer(await getPrayerTimes({ city, country, method: config.method }));
+    return sendText(jid, `🟢 *الحالة المباشرة*\nالصلاة القادمة: ${prayerNameArabic[next.name]}\nالوقت: ${next.time}\nالمتبقي: ${next.remainingText}`);
+  }
+  if (body === '.التالي') {
+    const next = getNextPrayer(await getPrayerTimes({ city, country, method: config.method }));
+    return sendText(jid, `📌 *الصلاة القادمة*\n${prayerNameArabic[next.name]} - ${next.time}\n🎧 ملف الأذان: ${getAdhanFileName(next.name)}\n⏳ المتبقي: ${next.remainingText}`);
   }
   if (body === '.رمضان') {
     const times = await getPrayerTimes({ city, country, method: config.method });
-    return client.sendMessage(message.from, `🌙 *حالة رمضان اليومية*\nالمدينة: ${city}\nالإمساك: ${times.Imsak || '-'}\nالشروق: ${times.Sunrise || '-'}\nالإفطار: ${times.Maghrib}`);
+    return sendText(jid, `🌙 *حالة رمضان اليومية*\nالإمساك: ${times.Imsak || '-'}\nالإفطار: ${times.Maghrib}`);
   }
 }
 
-async function handleAdminCommand(message, body) {
-  if (body === '.ربط' || body === '>connect') {
-    const groups = (await client.getChats()).filter((c) => c.isGroup);
-    if (!groups.length) return client.sendMessage(message.from, 'لا توجد مجموعات متاحة حالياً.');
-    const text = groups.map((g, i) => `${i + 1}) ${g.name}`).join('\n');
-    return client.sendMessage(message.from, `📌 المجموعات المتاحة:\n${text}\n\nأرسل .ربط[رقم]`);
+async function handleAdminCommand(jid, body) {
+  if (body === '.ربط') {
+    const groups = Object.values(await sock.groupFetchAllParticipating());
+    if (!groups.length) return sendText(jid, 'لا توجد مجموعات متاحة حاليًا.');
+    return sendText(jid, `📌 المجموعات:\n${groups.map((g, i) => `${i + 1}) ${g.subject}`).join('\n')}\n\nأرسل .ربط[رقم]`);
   }
-
-  if (/^(\.ربط\d+|>connect\d+)$/.test(body)) {
-    const idx = Number(body.replace('>connect', '').replace('.ربط', '')) - 1;
-    const groups = (await client.getChats()).filter((c) => c.isGroup);
-    const selected = groups[idx];
-    if (!selected) return client.sendMessage(message.from, 'رقم غير صحيح.');
-    const ok = addTarget(selected.id._serialized, selected.name, config.city, config.country);
-    return client.sendMessage(message.from, ok ? `✅ تم ربط ${selected.name}` : 'ℹ️ المجموعة مرتبطة بالفعل.');
+  if (/^\.ربط\d+$/.test(body)) {
+    const idx = Number(body.replace('.ربط', '')) - 1;
+    const selected = Object.values(await sock.groupFetchAllParticipating())[idx];
+    if (!selected) return sendText(jid, 'رقم غير صحيح.');
+    const ok = addTarget(selected.id, selected.subject, config.city, config.country);
+    return sendText(jid, ok ? `✅ تم ربط ${selected.subject}` : 'ℹ️ المجموعة مرتبطة بالفعل.');
   }
-
-  if (body === '.فصل' || body === '>disconnect') return client.sendMessage(message.from, removeTarget(message.from) ? '✅ تم فك الربط.' : 'ℹ️ غير مرتبطة.');
-  if (body === '.حالة' || body === '>status') return client.sendMessage(message.from, formatStatus(getTarget(message.from)));
-
-  if (body.startsWith('.مدينة|') || body.startsWith('>setcity|')) {
+  if (body === '.فصل') return sendText(jid, removeTarget(jid) ? '✅ تم فك الربط.' : 'ℹ️ غير مرتبطة.');
+  if (body === '.حالة') return sendText(jid, formatStatus(getTarget(jid)));
+  if (body.startsWith('.مدينة|')) {
     const [, city, country] = body.split('|');
-    if (!city || !country) return client.sendMessage(message.from, 'الصيغة الصحيحة: .مدينة|City|Country');
-    const updated = updateTarget(message.from, { city, country });
-    return client.sendMessage(message.from, updated ? `✅ تم تحديث الموقع إلى ${city}, ${country}` : 'ℹ️ اربط الدردشة أولاً باستخدام >connect');
+    if (!city || !country) return sendText(jid, 'الصيغة الصحيحة: .مدينة|City|Country');
+    const updated = updateTarget(jid, { city, country });
+    return sendText(jid, updated ? `✅ تم تحديث الموقع إلى ${city}, ${country}` : 'ℹ️ اربط الدردشة أولاً باستخدام .ربط');
   }
-
-  if (body.startsWith('.تفعيل|') || body.startsWith('>toggle|')) {
+  if (body.startsWith('.تفعيل|')) {
     const [, key] = body.split('|');
     const map = { prayer: 'enablePrayer', athkar: 'enableAthkar', quran: 'enableQuran', ramadan: 'enableRamadan' };
     const field = map[key];
-    if (!field) return client.sendMessage(message.from, 'الخدمات المتاحة: prayer, athkar, quran, ramadan');
-    const target = getTarget(message.from);
-    if (!target) return client.sendMessage(message.from, 'اربط الدردشة أولاً باستخدام >connect');
-    const updated = updateTarget(message.from, { [field]: !target[field] });
-    return client.sendMessage(message.from, `✅ ${key}: ${updated[field] ? 'مفعّل' : 'معطّل'}`);
+    if (!field) return sendText(jid, 'الخدمات المتاحة: prayer, athkar, quran, ramadan');
+    const target = getTarget(jid);
+    if (!target) return sendText(jid, 'اربط الدردشة أولاً باستخدام .ربط');
+    const updated = updateTarget(jid, { [field]: !target[field] });
+    return sendText(jid, `✅ ${key}: ${updated[field] ? 'مفعّل' : 'معطّل'}`);
   }
 }
 
-client.on('qr', (qr) => qrcode.generate(qr, { small: true }));
-client.on('ready', () => console.log('✅ Ramadan Islamic WhatsApp Bot ready'));
-client.on('message', async (message) => {
-  const body = (message.body || '').trim();
-  try {
-    if (body.startsWith('.')) {
-      await handleServicesCommand(message, body);
-      if (/^(\.ربط\d+|\.ربط|\.فصل|\.حالة|\.مدينة\||\.تفعيل\|)/.test(body)) await handleAdminCommand(message, body);
+async function startBaileys() {
+  const { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState, makeInMemoryStore } = await loadBaileysApi();
+  const { state, saveCreds } = await useMultiFileAuthState(config.authFolder);
+  const { version } = await fetchLatestBaileysVersion();
+
+  sock = makeWASocket({ version, auth: state, printQRInTerminal: true, logger: undefined });
+  makeInMemoryStore({ logger: undefined }).bind(sock.ev);
+
+  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+    if (connection === 'open') logger.info('✅ Baileys WhatsApp Bot ready');
+    if (connection === 'close') {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = code !== DisconnectReason.loggedOut;
+      logger.warn(`connection closed (code=${code}), reconnect=${shouldReconnect}`);
+      if (shouldReconnect) startBaileys();
     }
-    if (body.startsWith('>')) await handleAdminCommand(message, body);
-  } catch (error) {
-    console.error(error.message);
-    await client.sendMessage(message.from, 'حدث خطأ أثناء تنفيذ الأمر.');
-  }
-});
+  });
 
-cron.schedule('* * * * *', async () => {
-  await checkPrayerAlerts();
-  await checkSolarAthkarAlerts();
-}, { timezone: config.timezone });
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+    const msg = messages[0];
+    if (!msg?.message || msg.key.fromMe) return;
+    const jid = msg.key.remoteJid;
+    const body = (getMessageText(msg.message) || '').trim();
+    if (!jid || !body.startsWith('.')) return;
 
-cron.schedule(toCron(config.nightlyAzkarTime), async () => {
-  await broadcastTo(getActiveTargets((t) => t.enableAthkar), formatAthkar('أذكار المساء', athkar.evening));
-}, { timezone: config.timezone });
-cron.schedule(toCron(config.quranPdfTime), sendQuranPdf, { timezone: config.timezone });
-cron.schedule(toCron(config.dailyJuzTime), sendDailyJuz, { timezone: config.timezone });
-cron.schedule('0 4 * * *', sendRamadanStatus, { timezone: config.timezone });
+    try {
+      await handleServicesCommand(jid, body);
+      if (/^(\.ربط\d+|\.ربط|\.فصل|\.حالة|\.مدينة\||\.تفعيل\|)/.test(body)) await handleAdminCommand(jid, body);
+    } catch (error) {
+      logger.error(error);
+      await sendText(jid, 'حدث خطأ أثناء تنفيذ الأمر.');
+    }
+  });
+}
 
-client.initialize();
+export async function startBot() {
+  if (started) return;
+  started = true;
+
+  cron.schedule('* * * * *', async () => {
+    if (!sock) return;
+    await checkPrayerAlerts();
+    await checkSolarAthkarAlerts();
+  }, { timezone: config.timezone });
+  cron.schedule(toCron(config.nightlyAzkarTime), async () => sock && broadcastTo(getActiveTargets((t) => t.enableAthkar), formatAthkar('أذكار المساء', athkar.evening)), { timezone: config.timezone });
+  cron.schedule(toCron(config.quranPdfTime), async () => sock && sendQuranPdf(), { timezone: config.timezone });
+  cron.schedule(toCron(config.dailyJuzTime), async () => sock && sendDailyJuz(), { timezone: config.timezone });
+  cron.schedule('0 4 * * *', async () => sock && sendRamadanStatus(), { timezone: config.timezone });
+
+  if (config.skipWhatsappInit) logger.warn('⚠️ SKIP_WHATSAPP_INIT=true -> skipping WhatsApp init');
+  else await startBaileys();
+}
