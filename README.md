@@ -35,12 +35,12 @@
 - `.ملفات`
 
 ## أوامر الإدارة
-- `>connect`
-- `>connect1`
-- `>disconnect`
-- `>status`
-- `>setcity|City|Country`
-- `>toggle|prayer|athkar|quran|ramadan`
+- `.ربط`
+- `.ربط1`
+- `.فصل`
+- `.حالة`
+- `.مدينة|City|Country`
+- `.تفعيل|prayer|athkar|quran|ramadan`
 
 ## التشغيل
 ```bash

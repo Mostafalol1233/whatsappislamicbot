@@ -212,15 +212,15 @@ async function handleServicesCommand(message, body) {
 }
 
 async function handleAdminCommand(message, body) {
-  if (body === '>connect') {
+  if (body === '.ربط' || body === '>connect') {
     const groups = (await client.getChats()).filter((c) => c.isGroup);
     if (!groups.length) return client.sendMessage(message.from, 'لا توجد مجموعات متاحة حالياً.');
     const text = groups.map((g, i) => `${i + 1}) ${g.name}`).join('\n');
-    return client.sendMessage(message.from, `📌 المجموعات المتاحة:\n${text}\n\nأرسل >connect[رقم]`);
+    return client.sendMessage(message.from, `📌 المجموعات المتاحة:\n${text}\n\nأرسل .ربط[رقم]`);
   }
 
-  if (/^>connect\d+$/.test(body)) {
-    const idx = Number(body.replace('>connect', '')) - 1;
+  if (/^(\.ربط\d+|>connect\d+)$/.test(body)) {
+    const idx = Number(body.replace('>connect', '').replace('.ربط', '')) - 1;
     const groups = (await client.getChats()).filter((c) => c.isGroup);
     const selected = groups[idx];
     if (!selected) return client.sendMessage(message.from, 'رقم غير صحيح.');
@@ -228,17 +228,17 @@ async function handleAdminCommand(message, body) {
     return client.sendMessage(message.from, ok ? `✅ تم ربط ${selected.name}` : 'ℹ️ المجموعة مرتبطة بالفعل.');
   }
 
-  if (body === '>disconnect') return client.sendMessage(message.from, removeTarget(message.from) ? '✅ تم فك الربط.' : 'ℹ️ غير مرتبطة.');
-  if (body === '>status') return client.sendMessage(message.from, formatStatus(getTarget(message.from)));
+  if (body === '.فصل' || body === '>disconnect') return client.sendMessage(message.from, removeTarget(message.from) ? '✅ تم فك الربط.' : 'ℹ️ غير مرتبطة.');
+  if (body === '.حالة' || body === '>status') return client.sendMessage(message.from, formatStatus(getTarget(message.from)));
 
-  if (body.startsWith('>setcity|')) {
+  if (body.startsWith('.مدينة|') || body.startsWith('>setcity|')) {
     const [, city, country] = body.split('|');
-    if (!city || !country) return client.sendMessage(message.from, 'الصيغة الصحيحة: >setcity|City|Country');
+    if (!city || !country) return client.sendMessage(message.from, 'الصيغة الصحيحة: .مدينة|City|Country');
     const updated = updateTarget(message.from, { city, country });
     return client.sendMessage(message.from, updated ? `✅ تم تحديث الموقع إلى ${city}, ${country}` : 'ℹ️ اربط الدردشة أولاً باستخدام >connect');
   }
 
-  if (body.startsWith('>toggle|')) {
+  if (body.startsWith('.تفعيل|') || body.startsWith('>toggle|')) {
     const [, key] = body.split('|');
     const map = { prayer: 'enablePrayer', athkar: 'enableAthkar', quran: 'enableQuran', ramadan: 'enableRamadan' };
     const field = map[key];
@@ -255,7 +255,10 @@ client.on('ready', () => console.log('✅ Ramadan Islamic WhatsApp Bot ready'));
 client.on('message', async (message) => {
   const body = (message.body || '').trim();
   try {
-    if (body.startsWith('.')) await handleServicesCommand(message, body);
+    if (body.startsWith('.')) {
+      await handleServicesCommand(message, body);
+      if (/^(\.ربط\d+|\.ربط|\.فصل|\.حالة|\.مدينة\||\.تفعيل\|)/.test(body)) await handleAdminCommand(message, body);
+    }
     if (body.startsWith('>')) await handleAdminCommand(message, body);
   } catch (error) {
     console.error(error.message);
