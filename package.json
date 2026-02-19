@@ -2,10 +2,10 @@
   "name": "whatsapp-islamic-bot",
   "version": "1.0.0",
   "description": "بوت واتساب إسلامي لمواقيت الصلاة والأذكار والتنبيهات",
-  "main": "src/bot.js",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/bot.js",
+    "start": "node index.js",
     "test": "node --test"
   },
   "dependencies": {
