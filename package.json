@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-islamic-bot",
+  "version": "1.0.0",
+  "description": "بوت واتساب إسلامي لمواقيت الصلاة والأذكار والتنبيهات",
+  "main": "src/bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/bot.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.25.0"
+  }
+}
