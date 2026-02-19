@@ -3,17 +3,9 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import qrcode from 'qrcode-terminal';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
-import {
-  azkarAfterPrayer,
-  azkarMasa,
-  azkarSabah,
-  commandMenu,
-  duas,
-  prayerNameArabic,
-  prayerRakaatInfo
-} from './content.js';
-import { addTarget, getStore, removeTarget } from './store.js';
-import { formatPrayerTimes, getNextPrayer, getPrayerTimes, isPrayerNow } from './prayer.js';
+import { athkar, commandMenu, duas, formatAthkar, formatPrayerInfo, prayerNameArabic } from './content.js';
+import { addTarget, getStore, getTarget, removeTarget, updateTarget } from './store.js';
+import { formatPrayerTimes, getDailyJuzNumber, getNextPrayer, getPrayerTimes, isPrayerNow } from './prayer.js';
 
 dotenv.config();
 
@@ -21,24 +13,30 @@ const config = {
   city: process.env.CITY || 'Cairo',
   country: process.env.COUNTRY || 'Egypt',
   method: Number(process.env.METHOD || 5),
+  timezone: process.env.TIMEZONE || 'Africa/Cairo',
   nightlyAzkarTime: process.env.NIGHTLY_AZKAR_TIME || '21:30',
+  morningAthkarTime: process.env.MORNING_ATHKAR_TIME || '07:00',
+  eveningAthkarTime: process.env.EVENING_ATHKAR_TIME || '17:00',
+  quranPdfTime: process.env.QURAN_PDF_TIME || '10:00',
+  dailyJuzTime: process.env.DAILY_JUZ_TIME || '08:00',
   adhan16Path: process.env.ADHAN_16_PATH || './assets/adhan16.mp3',
   adhan52Path: process.env.ADHAN_52_PATH || './assets/adhan52.mp3',
   adhan16Url: process.env.ADHAN_16_URL || '',
-  adhan52Url: process.env.ADHAN_52_URL || ''
+  adhan52Url: process.env.ADHAN_52_URL || '',
+  quranPdfUrl: process.env.QURAN_PDF_URL || 'https://www.searchtruth.com/pdf/Holy-Quran-Arabic-Writing-1.pdf'
 };
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
-});
-
+const client = new Client({ authStrategy: new LocalAuth(), puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] } });
 const notified = new Set();
 
-async function broadcast(text, options = {}) {
-  const { targets } = getStore();
-  for (const target of targets) {
-    await client.sendMessage(target.id, text, options);
+const toCron = (hhmm) => {
+  const [h, m] = hhmm.split(':');
+  return `${m} ${h} * * *`;
+};
+
+async function broadcastTo(targets, payload, options = undefined) {
+  for (const t of targets) {
+    await client.sendMessage(t.id, payload, options);
   }
 }
 
@@ -46,102 +44,150 @@ async function buildAdhanMedia(prayerKey) {
   const use52 = prayerKey === 'Fajr' || prayerKey === 'Maghrib';
   const path = use52 ? config.adhan52Path : config.adhan16Path;
   const url = use52 ? config.adhan52Url : config.adhan16Url;
-
   if (path && fs.existsSync(path)) return MessageMedia.fromFilePath(path);
   if (url) return MessageMedia.fromUrl(url, { unsafeMime: true });
   return null;
 }
 
-async function notifyPrayer(prayerKey, time) {
-  const prayerAr = prayerNameArabic[prayerKey] || prayerKey;
-  const info = prayerRakaatInfo[prayerKey] || '';
-  const message = `🕌 *حان الآن وقت صلاة ${prayerAr}*\n⏰ الوقت: ${time}\n📌 ${info}\n\nتقبل الله منا ومنكم صالح الأعمال.`;
+function getActiveTargets(filter = () => true) {
+  return getStore().targets.filter((t) => t.isActive && filter(t));
+}
 
-  await broadcast(message);
+async function notifyPrayerForTarget(target, prayerKey, time) {
+  const ar = prayerNameArabic[prayerKey] || prayerKey;
+  const msg = `📢 *حان الآن موعد أذان ${ar} في ${target.city}* 🕌\n━━━━━━━━━━━━━━━━━━\n${formatPrayerInfo(prayerKey)}\n━━━━━━━━━━━━━━━━━━\n🤲 لا تنسوا الدعاء عند الأذان`;
+  await client.sendMessage(target.id, msg);
 
   const media = await buildAdhanMedia(prayerKey);
-  if (media) {
-    const caption = `🎧 أذان صلاة ${prayerAr} (${prayerKey === 'Fajr' || prayerKey === 'Maghrib' ? 'رقم 52' : 'رقم 16'})`;
-    await broadcast(media, { sendAudioAsVoice: true, caption });
-  }
+  if (media) await client.sendMessage(target.id, media, { sendAudioAsVoice: true, caption: `🎧 أذان ${ar} (${prayerKey === 'Fajr' || prayerKey === 'Maghrib' ? 'رقم 52' : 'رقم 16'})` });
 
-  await broadcast(azkarAfterPrayer);
+  if (target.enableAthkar) {
+    setTimeout(async () => {
+      await client.sendMessage(target.id, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer));
+    }, 15 * 60 * 1000);
+  }
 }
 
 async function checkPrayerAlerts() {
-  const times = await getPrayerTimes(config);
   const now = new Date();
   const dateKey = now.toISOString().slice(0, 10);
+  const targets = getActiveTargets((t) => t.enablePrayer);
 
-  for (const prayer of ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']) {
-    const mark = `${dateKey}-${prayer}`;
-    if (!notified.has(mark) && isPrayerNow(times[prayer], now)) {
-      await notifyPrayer(prayer, times[prayer]);
-      notified.add(mark);
+  for (const target of targets) {
+    const times = await getPrayerTimes({ city: target.city, country: target.country, method: config.method });
+    for (const prayer of ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']) {
+      const mark = `${dateKey}-${target.id}-${prayer}`;
+      if (!notified.has(mark) && isPrayerNow(times[prayer], now)) {
+        await notifyPrayerForTarget(target, prayer, times[prayer]);
+        notified.add(mark);
+      }
     }
-  }
-
-  if (notified.size > 20) {
-    const today = now.toISOString().slice(0, 10);
-    [...notified].forEach((entry) => {
-      if (!entry.startsWith(today)) notified.delete(entry);
-    });
   }
 }
 
+async function sendScheduledAthkar(type) {
+  const targets = getActiveTargets((t) => t.enableAthkar);
+  const title = type === 'morning' ? 'أذكار الصباح' : 'أذكار المساء';
+  const text = formatAthkar(title, type === 'morning' ? athkar.morning : athkar.evening);
+  await broadcastTo(targets, text);
+}
+
+async function sendQuranPdf() {
+  const targets = getActiveTargets((t) => t.enableQuran);
+  const media = await MessageMedia.fromUrl(config.quranPdfUrl, { unsafeMime: true, filename: 'Holy-Quran.pdf' });
+  for (const t of targets) {
+    await client.sendMessage(t.id, media, { caption: '📖 *مصحف المدينة المنورة*\nاجعل لك ورداً يومياً من القرآن 🌙', sendMediaAsDocument: true });
+  }
+}
+
+async function sendDailyJuz() {
+  const juz = getDailyJuzNumber(new Date());
+  const targets = getActiveTargets((t) => t.enableQuran);
+  const text = `📚 *ورد اليوم الرمضاني*\nالجزء: ${juz}\nالرابط: https://quran.com/juz/${juz}\n\nتقبل الله طاعتكم.`;
+  await broadcastTo(targets, text);
+}
+
+async function sendRamadanStatus() {
+  const targets = getActiveTargets((t) => t.enableRamadan);
+  for (const t of targets) {
+    const times = await getPrayerTimes({ city: t.city, country: t.country, method: config.method });
+    const msg = `🌙 *تذكير رمضاني*\n⏲️ الإمساك: ${times.Imsak || '-'}\n🌇 الإفطار (المغرب): ${times.Maghrib}\n🤲 اللهم بلغنا رمضان وتقبل منا.`;
+    await client.sendMessage(t.id, msg);
+  }
+}
+
+function formatStatus(target) {
+  if (!target) return 'هذه الدردشة غير مرتبطة. استخدم >connect أولاً.';
+  return `⚙️ *حالة الدردشة*\nالاسم: ${target.name}\nالمدينة: ${target.city}, ${target.country}\nالصلاة: ${target.enablePrayer ? '✅' : '❌'}\nالأذكار: ${target.enableAthkar ? '✅' : '❌'}\nالقرآن: ${target.enableQuran ? '✅' : '❌'}\nرمضان: ${target.enableRamadan ? '✅' : '❌'}`;
+}
+
 async function handleServicesCommand(message, body) {
+  const target = getTarget(message.from);
   if (body === '.اوامر') return client.sendMessage(message.from, commandMenu);
-  if (body === '.صباح') return client.sendMessage(message.from, azkarSabah);
-  if (body === '.مساء') return client.sendMessage(message.from, azkarMasa);
-  if (body === '.صلاة') return client.sendMessage(message.from, azkarAfterPrayer);
-  if (body === '.دعاء') return client.sendMessage(message.from, duas);
+  if (body === '.صباح') return client.sendMessage(message.from, formatAthkar('أذكار الصباح', athkar.morning));
+  if (body === '.مساء') return client.sendMessage(message.from, formatAthkar('أذكار المساء', athkar.evening));
+  if (body === '.صلاة') return client.sendMessage(message.from, formatAthkar('الأذكار بعد الصلاة المفروضة', athkar.afterPrayer));
+  if (body === '.دعاء') return client.sendMessage(message.from, `🤲 *أدعية مختارة*\n` + duas.map((d) => `• ${d}`).join('\n'));
+  if (body === '.ورد') return client.sendMessage(message.from, `📚 ورد اليوم: الجزء ${getDailyJuzNumber(new Date())}\nhttps://quran.com/juz/${getDailyJuzNumber(new Date())}`);
+
+  const city = target?.city || config.city;
+  const country = target?.country || config.country;
 
   if (body === '.مواقيت') {
-    const times = await getPrayerTimes(config);
-    return client.sendMessage(message.from, formatPrayerTimes(times));
+    const times = await getPrayerTimes({ city, country, method: config.method });
+    return client.sendMessage(message.from, formatPrayerTimes(times, city));
+  }
+  if (body === '.live') {
+    const times = await getPrayerTimes({ city, country, method: config.method });
+    const next = getNextPrayer(times);
+    return client.sendMessage(message.from, `🟢 *الحالة المباشرة*\nالصلاة القادمة: ${prayerNameArabic[next.name]}\nالوقت: ${next.time}\nالمتبقي: ${next.remainingText}`);
+  }
+  if (body === '.رمضان') {
+    const times = await getPrayerTimes({ city, country, method: config.method });
+    return client.sendMessage(message.from, `🌙 *حالة رمضان اليومية*\nالمدينة: ${city}\nالإمساك: ${times.Imsak || '-'}\nالإفطار: ${times.Maghrib}`);
   }
 }
 
 async function handleAdminCommand(message, body) {
   if (body === '>connect') {
-    const chats = await client.getChats();
-    const groups = chats.filter((c) => c.isGroup);
-    if (!groups.length) return client.sendMessage(message.from, 'لا توجد مجموعات متاحة حالياً.');
-
+    const groups = (await client.getChats()).filter((c) => c.isGroup);
     const text = groups.map((g, i) => `${i + 1}) ${g.name}`).join('\n');
-    return client.sendMessage(message.from, `📌 المجموعات المتاحة:\n${text}\n\nللربط أرسل: >connect[رقم]`);
+    return client.sendMessage(message.from, `📌 المجموعات المتاحة:\n${text}\n\nأرسل >connect[رقم]`);
   }
 
   if (/^>connect\d+$/.test(body)) {
-    const index = Number(body.replace('>connect', '')) - 1;
-    const chats = await client.getChats();
-    const groups = chats.filter((c) => c.isGroup);
-    const selected = groups[index];
-    if (!selected) return client.sendMessage(message.from, 'رقم المجموعة غير صحيح.');
-
-    const added = addTarget(selected.id._serialized, selected.name);
-    return client.sendMessage(message.from, added ? `✅ تم ربط المجموعة: ${selected.name}` : `ℹ️ المجموعة ${selected.name} مرتبطة بالفعل.`);
+    const idx = Number(body.replace('>connect', '')) - 1;
+    const groups = (await client.getChats()).filter((c) => c.isGroup);
+    const selected = groups[idx];
+    if (!selected) return client.sendMessage(message.from, 'رقم غير صحيح.');
+    const ok = addTarget(selected.id._serialized, selected.name, config.city, config.country);
+    return client.sendMessage(message.from, ok ? `✅ تم ربط ${selected.name}` : 'ℹ️ المجموعة مرتبطة بالفعل.');
   }
 
-  if (body === '>disconnect') {
-    const removed = removeTarget(message.from);
-    return client.sendMessage(message.from, removed ? '✅ تم فك الربط.' : 'ℹ️ هذه الدردشة غير مرتبطة.');
+  if (body === '>disconnect') return client.sendMessage(message.from, removeTarget(message.from) ? '✅ تم فك الربط.' : 'ℹ️ غير مرتبطة.');
+  if (body === '>status') return client.sendMessage(message.from, formatStatus(getTarget(message.from)));
+
+  if (body.startsWith('>setcity|')) {
+    const [, city, country] = body.split('|');
+    if (!city || !country) return client.sendMessage(message.from, 'الصيغة الصحيحة: >setcity|City|Country');
+    const updated = updateTarget(message.from, { city, country });
+    return client.sendMessage(message.from, updated ? `✅ تم تحديث الموقع إلى ${city}, ${country}` : 'ℹ️ اربط الدردشة أولاً باستخدام >connect');
   }
 
-  if (body === '>live') {
-    const times = await getPrayerTimes(config);
-    const next = getNextPrayer(times);
-    const prayerAr = prayerNameArabic[next.name] || next.name;
-    return client.sendMessage(
-      message.from,
-      `🟢 *الحالة المباشرة*\nالصلاة القادمة: ${prayerAr}\nالوقت: ${next.time}\nالمتبقي: ${next.remainingText}`
-    );
+  if (body.startsWith('>toggle|')) {
+    const [, key] = body.split('|');
+    const map = { prayer: 'enablePrayer', athkar: 'enableAthkar', quran: 'enableQuran', ramadan: 'enableRamadan' };
+    const field = map[key];
+    if (!field) return client.sendMessage(message.from, 'الخدمات المتاحة: prayer, athkar, quran, ramadan');
+    const target = getTarget(message.from);
+    if (!target) return client.sendMessage(message.from, 'اربط الدردشة أولاً باستخدام >connect');
+    const updated = updateTarget(message.from, { [field]: !target[field] });
+    return client.sendMessage(message.from, `✅ ${key}: ${updated[field] ? 'مفعّل' : 'معطّل'}`);
   }
 }
 
 client.on('qr', (qr) => qrcode.generate(qr, { small: true }));
-client.on('ready', () => console.log('✅ Islamic WhatsApp Bot is ready'));
-
+client.on('ready', () => console.log('✅ Ramadan Islamic WhatsApp Bot ready'));
 client.on('message', async (message) => {
   const body = (message.body || '').trim();
   try {
@@ -149,24 +195,16 @@ client.on('message', async (message) => {
     if (body.startsWith('>')) await handleAdminCommand(message, body);
   } catch (error) {
     console.error(error.message);
-    await client.sendMessage(message.from, 'حدث خطأ أثناء تنفيذ الأمر، حاول مرة أخرى.');
+    await client.sendMessage(message.from, 'حدث خطأ أثناء تنفيذ الأمر.');
   }
 });
 
-cron.schedule('* * * * *', async () => {
-  try {
-    await checkPrayerAlerts();
-  } catch (error) {
-    console.error('Prayer scheduler error:', error.message);
-  }
-});
-
-cron.schedule(config.nightlyAzkarTime.split(':').reverse().join(' ') + ' * * *', async () => {
-  try {
-    await broadcast(`🌙 تذكير أذكار المساء بعد العشاء\n\n${azkarMasa}`);
-  } catch (error) {
-    console.error('Nightly azkar scheduler error:', error.message);
-  }
-});
+cron.schedule('* * * * *', checkPrayerAlerts, { timezone: config.timezone });
+cron.schedule(toCron(config.morningAthkarTime), () => sendScheduledAthkar('morning'), { timezone: config.timezone });
+cron.schedule(toCron(config.eveningAthkarTime), () => sendScheduledAthkar('evening'), { timezone: config.timezone });
+cron.schedule(toCron(config.nightlyAzkarTime), () => sendScheduledAthkar('evening'), { timezone: config.timezone });
+cron.schedule(toCron(config.quranPdfTime), sendQuranPdf, { timezone: config.timezone });
+cron.schedule(toCron(config.dailyJuzTime), sendDailyJuz, { timezone: config.timezone });
+cron.schedule('0 4 * * *', sendRamadanStatus, { timezone: config.timezone });
 
 client.initialize();
