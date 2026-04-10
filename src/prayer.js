@@ -4,8 +4,7 @@ function parseTimeToMinutes(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + m;
 }
-
-function convertTo12Hour(time) {
+export function convertTo12Hour(time) {
   if (!time) return '-';
   const [hours, minutes] = time.split(':').map(Number);
   const period = hours >= 12 ? 'م' : 'ص';
@@ -61,11 +60,11 @@ export function isPrayerNow(prayerTime, now = new Date()) {
   return `${hh}:${mm}` === prayerTime;
 }
 
-export function getDailyJuzNumber(now = new Date('2026-02-20T00:00:00')) {
-  const start = new Date('2026-02-20T00:00:00');
+export function getDailyJuzNumber(now = new Date(), startDateStr = '2026-02-20') {
+  const start = new Date(`${startDateStr}T00:00:00`);
   const current = new Date(now);
   current.setHours(0, 0, 0, 0);
   const diffDays = Math.floor((current.getTime() - start.getTime()) / 86400000);
   if (diffDays < 0) return 1;
-  return ((diffDays + 1) % 30) + 1;
+  return (diffDays % 30) + 1;
 }

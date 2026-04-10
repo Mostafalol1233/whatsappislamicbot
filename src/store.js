@@ -27,7 +27,11 @@ function defaultTarget({ id, name, city = 'Cairo', country = 'Egypt' }) {
     enablePrayer: true,
     enableAthkar: true,
     enableQuran: true,
-    enableRamadan: true,
+    enableDaily: true,
+    enableChallenges: true,
+    enableHourlyAthkar: true,
+    sentQuestionIndices: [],
+    sentLog: {}, // { date: 'YYYY-MM-DD', events: ['fajr', 'prophets', ...] }
     createdAt: new Date().toISOString()
   };
 }
@@ -60,4 +64,31 @@ export function updateTarget(id, updates) {
 export function getTarget(id) {
   const store = getStore();
   return store.targets.find((t) => t.id === id) || null;
+}
+
+export function markEventSent(targetId, eventKey) {
+  const store = getStore();
+  const idx = store.targets.findIndex((t) => t.id === targetId);
+  if (idx === -1) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  const target = store.targets[idx];
+
+  if (target.sentLog?.date !== today) {
+    target.sentLog = { date: today, events: [] };
+  }
+
+  if (!target.sentLog.events.includes(eventKey)) {
+    target.sentLog.events.push(eventKey);
+  }
+
+  setStore(store);
+}
+
+export function isEventSentToday(targetId, eventKey) {
+  const target = getTarget(targetId);
+  if (!target || !target.sentLog) return false;
+  
+  const today = new Date().toISOString().split('T')[0];
+  return target.sentLog.date === today && target.sentLog.events.includes(eventKey);
 }
