@@ -42,7 +42,8 @@ const config = {
   enableSolarAthkar: process.env.ENABLE_SOLAR_ATHKAR !== 'false',
   skipWhatsappInit: process.env.SKIP_WHATSAPP_INIT === 'true',
   authFolder: process.env.BAILEYS_AUTH_FOLDER || 'auth_info_baileys',
-  ownerNumber: process.env.OWNER_NUMBER || '201500302461'
+  ownerNumbers: (process.env.OWNER_NUMBERS || '201500302461').split(',').map(n => n.trim()),
+  ownerLid: process.env.OWNER_LID || '181991152562371@lid'
 };
 
 const notified = new Set();
@@ -1002,18 +1003,69 @@ async function startBaileys() {
     const body = (getMessageText(msg.message) || '').trim();
     if (!jid) return;
 
-    // Handle @all command (Owner only)
-    if (body.includes('@all') && jid.endsWith('@g.us')) {
-      const sender = msg.key.participant || msg.key.remoteJid;
-      if (sender.startsWith(config.ownerNumber)) {
-        const groupMetadata = await sock.groupMetadata(jid);
-        const participants = groupMetadata.participants.map(p => p.id);
-        const text = body.replace(/@all/g, '').trim();
-        await sock.sendMessage(jid, {
-          text: text || '📢 تنبيه للجميع',
-          mentions: participants
-        }, { quoted: msg });
+    const lowBody = body.toLowerCase();
+
+    // Handle @all, @everyone or .mention command (Owner only)
+    const mentionKeywords = ['@all', '@everyone', '.mention'];
+    const hasMentionKeyword = mentionKeywords.some(kw => lowBody.includes(kw));
+    
+    if (hasMentionKeyword && jid.endsWith('@g.us')) {
+      const sender = msg.key.participant || msg.key.remoteJid || '';
+      
+      // Check if sender is owner using phone number list or LID
+      const isOwner = msg.key.fromMe || 
+                      config.ownerNumbers.some(num => sender.includes(num)) ||
+                      (config.ownerLid && sender === config.ownerLid);
+      
+      logger.info(`[Mention Debug] Keyword detected in ${jid}. Sender: ${sender}. isOwner: ${isOwner}. fromMe: ${msg.key.fromMe}`);
+      // Log more context for LID mapping if needed
+      if (!isOwner && sender.endsWith('@lid')) {
+        logger.info(`[Mention Debug] Sender is an LID. Metadata: ${JSON.stringify(msg.key)}`);
+      }
+
+      if (isOwner) {
+        try {
+          logger.info(`[Mention Debug] Fetching metadata for ${jid}...`);
+          const groupMetadata = await sock.groupMetadata(jid);
+          // Get all participants, handle both old and new WA IDs (lid/s.whatsapp.net/c.us)
+          const participants = groupMetadata.participants.map(p => p.id).filter(id => id && (id.includes('@s.whatsapp.net') || id.includes('@c.us') || id.includes('@lid')));
+          
+          logger.info(`[Mention Debug] Found ${participants.length} valid participants.`);
+
+          // Remove the keyword and send the message as a fresh broadcast with mentions
+          let finalMessage = body;
+          mentionKeywords.forEach(kw => {
+            const regex = new RegExp(kw.replace('.', '\\.'), 'gi');
+            finalMessage = finalMessage.replace(regex, '');
+          });
+          finalMessage = finalMessage.trim() || '📢 تنبيه للجميع';
+          
+          logger.info(`[Mention Debug] Sending mention message to ${participants.length} users.`);
+          await sock.sendMessage(jid, {
+            text: finalMessage,
+            mentions: participants
+          });
+          
+          // Delete the original message for everyone
+          try {
+            await sock.sendMessage(jid, { 
+              delete: {
+                remoteJid: jid,
+                fromMe: msg.key.fromMe,
+                id: msg.key.id,
+                participant: msg.key.participant || msg.key.remoteJid
+              } 
+            });
+            logger.info(`[Mention Debug] Trigger message deleted.`);
+          } catch (e) {
+            logger.warn(`[Mention Debug] Delete failed: ${e.message}`);
+          }
+        } catch (e) {
+          logger.error('[Mention Debug] Main mention logic error:', e);
+        }
         return;
+      } else {
+        logger.warn(`[Mention Debug] Sender ${sender} is NOT in owner list ${config.ownerNumbers.join(',')}. Skipping.`);
       }
     }
 
