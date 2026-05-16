@@ -19,6 +19,7 @@ export const commandMenu = `🌙 *أهلاً بك في رفيقك الإسلام
 • *.ورد* : ورد القرآن اليومي.
 • *.مواقيت_اليوم* : مواعيد الشروق والمغرب.
 • *.مصحف* : هبعت لك ملف المصحف PDF.
+• *.تحكم* : عرض لوحة تحكم سريعة لكل خدمات البوت.
 
 📚 *المحتوى اليومي الجديد:*
 • *قصص الأنبياء* : حلقات يومية مفصلة.
@@ -39,6 +40,8 @@ export const adminMenu = `⚙️ *لوحة التحكم* ⚙️
 • *.حالة* : عرض كل الجروبات والخدمات.
 • *.مدينة 1 مكة* : تغيير مدينة الجروب رقم 1.
 • *.تفعيل 1 صلاة* : تشغيل/إيقاف الصلاة للجروب 1.
+• *.تفعيل_الكل 1* : تشغيل كل الخدمات للجروب رقم 1.
+• *.تعطيل_الكل 1* : إيقاف كل الخدمات للجروب رقم 1.
 
 *أرقام الخدمات:*
 1: صلاة | 2: أذكار | 3: قرآن | 4: يومي | 5: مسابقات | 6: ساعة`;
@@ -376,6 +379,13 @@ export const DECO = {
   DHU_HIJJAH:(t) => `﷽──── *${t}* ────﷽`,
 };
 
+// WhatsApp "Read more" trick: hide long body behind a short intro line.
+const READ_MORE_GAP = Array(90).fill('‎').join('\n');
+
+export function withReadMore(titleLine, body) {
+  return `${titleLine}\n${READ_MORE_GAP}\n\n${body}`;
+}
+
 // Keep legacy helper for callers that haven't migrated yet
 export function decorateTitle(emoji, title) {
   return `❁══ *${emoji} ${title}* ══❁`;
@@ -389,7 +399,8 @@ export function formatAthkar(title, list, decoFnOrEmoji = DECO.MORNING) {
     const countStr = a.count > 1 ? ` 🌿 ×${a.count}` : '';
     return `*${i + 1}.* ${a.text}${countStr}`;
   }).join('\n\n');
-  return `${header}\n\n${items}\n\n🤲 _اللهم اجعلنا من الذاكرين الشاكرين_`;
+  const body = `${items}\n\n🤲 _اللهم اجعلنا من الذاكرين الشاكرين_`;
+  return withReadMore(header, body);
 }
 
 export function formatPrayerInfo(prayerKey) {

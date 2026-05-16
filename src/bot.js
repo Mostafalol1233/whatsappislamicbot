@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import qrcode from 'qrcode-terminal';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
-import { adminMenu, athkar, athkarCards, commandMenu, dailyCards, duas, decorateTitle, formatAthkar, formatPrayerInfo, istighfarList, lastTenDuas, prayerNameArabic, dailyDuas, dailyTips, seriesAllahNames, seriesAshraMubashareen, seriesSeerah, triviaQuestions, DECO } from './content.js';
+import { adminMenu, athkar, athkarCards, commandMenu, dailyCards, duas, decorateTitle, formatAthkar, formatPrayerInfo, istighfarList, lastTenDuas, prayerNameArabic, dailyDuas, dailyTips, seriesAllahNames, seriesAshraMubashareen, seriesSeerah, triviaQuestions, DECO, withReadMore } from './content.js';
 import { getAfterPrayerAzkar, getEveningAzkar, getMorningAzkar } from './azkarApi.js';
 import { getPixabayImages, getRandomIslamicImage } from './imageApi.js';
 import { addTarget, getStore, getTarget, removeTarget, updateTarget, isEventSentToday, markEventSent, saveQuestionKey, loadQuestionKey } from './store.js';
@@ -443,16 +443,44 @@ async function sendDailySeries() {
   const seerah = seriesSeerah.length ? seriesSeerah[(day - 1) % seriesSeerah.length] : null;
   if (!name && !ashra && !seerah) return;
 
-  let text = `${DECO.SERIES('📚 معلومات دينية اليوم')}\n\n`;
-  if (name) text += `☪️ *اسم الله الحُسنى:* *${name.name}*\n_${name.meaning}_\n🤲 ${name.dua}\n\n`;
-  if (ashra) text += `🌟 *${ashra.title}*\n${ashra.text}\n\n`;
-  if (seerah) text += `📖 *${seerah.title}*\n_${seerah.text}_\n`;
-  
+  const text = formatSeriesMessage(name, ashra, seerah);
+
   for (const t of targets) {
     if (isEventSentToday(t.id, 'daily-series')) continue;
     await sendText(t.id, text);
     markEventSent(t.id, 'daily-series');
   }
+}
+
+
+function formatSeriesMessage(name, ashra, seerah) {
+  let body = '';
+  if (name) {
+    body += `☪️ *اسم الله الحُسنى:* *${name.name}*
+` +
+      `✨ *المعنى:* _${name.meaning}_
+` +
+      `🤲 *دعاء مرتبط بالاسم:*
+_${name.dua}_
+
+`;
+  }
+  if (ashra) {
+    body += `🌟 *${ashra.title}*
+` +
+      `📌 _${ashra.text}_
+
+`;
+  }
+  if (seerah) {
+    body += `📖 *${seerah.title}*
+` +
+      `🕊️ _${seerah.text}_
+
+`;
+  }
+  body += '💚 _اللهم زدنا علماً نافعاً وعملاً صالحاً_';
+  return withReadMore(DECO.SERIES('📚 معلومات دينية اليوم'), body);
 }
 
 async function sendSalawatReminder() {
@@ -651,6 +679,34 @@ async function sendDailySchedule() {
   }
 }
 
+
+function fullControlsText(target) {
+  if (!target) return '❌ لا توجد إعدادات متاحة لهذا الشات.';
+  return `${DECO.CARD(`🎛️ التحكم الكامل — ${target.name}`)}
+
+` +
+    `🕌 الصلاة: ${target.enablePrayer ? '✅' : '❌'}
+` +
+    `📿 الأذكار: ${target.enableAthkar ? '✅' : '❌'}
+` +
+    `📖 القرآن: ${target.enableQuran ? '✅' : '❌'}
+` +
+    `🧠 المحتوى اليومي: ${target.enableDaily ? '✅' : '❌'}
+` +
+    `🎯 المسابقات: ${target.enableChallenges ? '✅' : '❌'}
+` +
+    `⏰ ذكر الساعة: ${target.enableHourlyAthkar ? '✅' : '❌'}
+
+` +
+    `✨ أوامر سريعة:
+` +
+    `• *.تفعيل_الكل [رقم]*
+` +
+    `• *.تعطيل_الكل [رقم]*
+` +
+    `• *.تفعيل [رقم] [صلاة|أذكار|قرآن|يومي|مسابقات|ساعة]*`;
+}
+
 function formatStatus(target) {
   if (!target) return 'الدردشة دي مش مربوطة، جرب تكتب .ابدأ الأول 🌸';
   return `⚙️ *إعدادات الجروب: ${target.name}*\n\nالمدينة: ${target.city}\n\nالصلاة: ${target.enablePrayer ? '✅' : '❌'}\nالأذكار: ${target.enableAthkar ? '✅' : '❌'}\nالقرآن: ${target.enableQuran ? '✅' : '❌'}\nالمحتوى اليومي: ${target.enableDaily ? '✅' : '❌'}\nالمسابقات: ${target.enableChallenges ? '✅' : '❌'}\nذكر الساعة: ${target.enableHourlyAthkar ? '✅' : '❌'}`;
@@ -681,6 +737,7 @@ async function fetchHadithOfDay() {
 async function handleServicesCommand(jid, body, msg) {
   const target = getTarget(jid);
   if (body === '.ما' || body === '.قايمه') return sendText(jid, commandMenu);
+  if (body === '.تحكم') return sendText(jid, fullControlsText(target));
   if (body === '.صباح') {
     const list = await getMorningAzkar();
     return sendText(jid, formatAthkar('أذكار الصباح', list));
@@ -695,20 +752,21 @@ async function handleServicesCommand(jid, body, msg) {
   }
   if (body === '.نوم') return sendText(jid, formatAthkar('أذكار النوم', athkar.sleep));
   if (body === '.اذكار') {
-    return sendText(jid, `🤲 *أدعية وأذكار*\n${duas.map((d) => `• ${d}`).join('\n')}`);
+    return sendText(jid, `${DECO.CARD('🤲 أدعية وأذكار')}\n\n${duas.map((d) => `• ✨ ${d}`).join('\n')}\n\n💚 _رددها بيقين_`);
   }
   if (body === '.اذكار_يومية') {
     const day = getBotDay();
     const idx = (day - 1) % lastTenDuas.length;
     const dua = lastTenDuas[idx];
-    return sendText(jid, `🤲 *دعاء اليوم*\n${dua}`);
+    const bodyText = `🌼 *ورد اليوم الإيماني:*\n\n🤲 _${dua}_\n\n✨ *اقتراح عملي:*\n• كرر الدعاء 3 مرات بيقين\n• صلِّ على النبي ﷺ 10 مرات\n• اختم باستغفار`;
+    return sendText(jid, withReadMore(DECO.NIGHTLY('🤲 أذكار ودعاء اليوم'), bodyText));
   }
-  if (body === '.استغفار') return sendText(jid, `🕊️ *مجلس استغفار*\n${istighfarList.map((d) => `• ${d}`).join('\n')}`);
+  if (body === '.استغفار') return sendText(jid, `${DECO.CARD('🕊️ مجلس استغفار')}\n\n${istighfarList.map((d) => `• 🤍 ${d}`).join('\n')}\n\n🌿 _أستغفر الله وأتوب إليه_`);
   if (body === '.حديث') {
     const hadith = await fetchHadithOfDay();
     if (!hadith) return sendText(jid, 'تعذر جلب حديث اليوم حاليًا، حاول مرة أخرى لاحقًا.');
     const refLine = hadith.ref ? `\n\n📚 المرجع: ${hadith.ref}` : '';
-    return sendText(jid, `📖 *حديث اليوم*\n${hadith.text}${refLine}`);
+    return sendText(jid, `${DECO.HADITH('📖 حديث اليوم')}\n\n${hadith.text}${refLine}\n\n🌸 _زادنا الله وإياكم هدىً ونوراً_`);
    }
   if (body === '.صورة') {
     return sendText(jid, 'اكتب الصيغة: .صورة كلمة البحث\nمثال: .صورة مكة مسجد');
@@ -813,7 +871,7 @@ async function handleServicesCommand(jid, body, msg) {
     }
     return;
   }
-  if (body === '.ملفات') return sendText(jid, '📁 *ملفات الصوت المتاحة*\n• 019--1.mp3 (أذان عام)\n• 052-.mp3 (أذان الفجر والمغرب)\n• 046--_up_by_muslem.mp3 (دعاء بعد العشاء)\n\nللطلب:\n• *.ملف019* : إرسال ملف 019--1.mp3\n• *.ملف052* : إرسال ملف 052-.mp3\n• *.ملف046* : إرسال ملف 046--_up_by_muslem.mp3');
+  if (body === '.ملفات') return sendText(jid, `${DECO.CARD('📁 مكتبة الملفات الصوتية')}\n\n• 🎧 *019--1.mp3* (أذان عام)\n• 🎧 *052-.mp3* (أذان الفجر والمغرب)\n• 🎧 *046--_up_by_muslem.mp3* (دعاء بعد العشاء)\n\n✨ *طريقة الطلب:*\n• *.ملف019*\n• *.ملف052*\n• *.ملف046*`);
   if (body === '.ابدأ') {
     const targetName = isChannel(jid) ? 'Channel' : jid.endsWith('@g.us') ? 'Group' : 'Direct Chat';
     if (!getTarget(jid)) addTarget(jid, targetName, config.city, config.country);
@@ -823,8 +881,8 @@ async function handleServicesCommand(jid, body, msg) {
     const juz = getDailyJuzNumber(new Date(), config.botStartDate);
     return sendJuzForChat(jid, juz);
   }
-  if (body === '.افطار') return sendText(jid, `🤲 *دعاء الإفطار*\n${ramadanDuas.iftar}`);
-  if (body === '.سحور') return sendText(jid, `🤲 *دعاء السحور*\n${ramadanDuas.suhoor}`);
+  if (body === '.افطار') return sendText(jid, `${DECO.CARD('🌇 دعاء الإفطار')}\n\n_${ramadanDuas.iftar}_\n\n🍃 _اللهم تقبل صيامنا_`);
+  if (body === '.سحور') return sendText(jid, `${DECO.CARD('🌙 دعاء السحور')}\n\n_${ramadanDuas.suhoor}_\n\n✨ _بارك الله في سحوركم_`);
   if (body === '.مصحف') {
     if (!sock) return;
     await sock.sendMessage(jid, { document: { url: config.quranPdfUrl }, fileName: 'Holy-Quran.pdf', mimetype: 'application/pdf', caption: '📖 مصحف المدينة المنورة' });
@@ -850,11 +908,11 @@ async function handleServicesCommand(jid, body, msg) {
   if (body === '.مواقيت') return sendText(jid, formatPrayerTimes(await getPrayerTimes({ city, country, method: config.method }), city));
   if (body === '.live') {
     const next = getNextPrayer(await getPrayerTimes({ city, country, method: config.method }));
-    return sendText(jid, `🟢 *الحالة المباشرة*\nالصلاة القادمة: ${prayerNameArabic[next.name]}\nالوقت: ${convertTo12Hour(next.time)}\nالمتبقي: ${next.remainingText}`);
+    return sendText(jid, `${DECO.PRAYER('🟢 الحالة المباشرة')}\n\n🕌 *الصلاة القادمة:* ${prayerNameArabic[next.name]}\n⏰ *الوقت:* ${convertTo12Hour(next.time)}\n⌛ *المتبقي:* ${next.remainingText}`);
   }
   if (body === '.التالي') {
     const next = getNextPrayer(await getPrayerTimes({ city, country, method: config.method }));
-    return sendText(jid, `📌 *الصلاة القادمة*\n${prayerNameArabic[next.name]} - ${convertTo12Hour(next.time)}\n🎧 ملف الأذان: ${getAdhanFileName(next.name)}\n⏳ المتبقي: ${next.remainingText}`);
+    return sendText(jid, `${DECO.PRAYER('📌 الصلاة القادمة')}\n\n🕌 ${prayerNameArabic[next.name]} — *${convertTo12Hour(next.time)}*\n🎧 *ملف الأذان:* ${getAdhanFileName(next.name)}\n⏳ *المتبقي:* ${next.remainingText}`);
   }
   if (body === '.مواقيت_اليوم') {
     const times = await getPrayerTimes({ city, country, method: config.method });
@@ -897,6 +955,22 @@ async function handleAdminCommand(jid, body, msg) {
     text += '💡 للتعديل: .تفعيل [رقم] [خدمة] أو .مدينة [رقم] [اسم المدينة] أو .فصل [رقم]';
     await sendText(jid, text);
     return;
+  }
+
+  if (body.startsWith('.تفعيل_الكل ')) {
+    const n = Number(body.split(' ')[1]);
+    const target = (targets || [])[n - 1];
+    if (!target) return sendText(jid, '❌ رقم غير صحيح.');
+    const updated = updateTarget(target.id, { enablePrayer: true, enableAthkar: true, enableQuran: true, enableDaily: true, enableChallenges: true, enableHourlyAthkar: true });
+    return sendText(jid, `${DECO.CARD('✅ تم تفعيل كل الخدمات')}\n\n*${updated.name}* جاهز الآن بكل الميزات 🌟`);
+  }
+
+  if (body.startsWith('.تعطيل_الكل ')) {
+    const n = Number(body.split(' ')[1]);
+    const target = (targets || [])[n - 1];
+    if (!target) return sendText(jid, '❌ رقم غير صحيح.');
+    const updated = updateTarget(target.id, { enablePrayer: false, enableAthkar: false, enableQuran: false, enableDaily: false, enableChallenges: false, enableHourlyAthkar: false });
+    return sendText(jid, `${DECO.CARD('⛔ تم تعطيل كل الخدمات')}\n\nتم إيقاف خدمات *${updated.name}* بالكامل.`);
   }
 
   // Simplified Toggle Command: .تفعيل [رقم الجروب] [الخدمة]
