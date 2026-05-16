@@ -1,0 +1,62 @@
+
+You are working on an Islamic WhatsApp bot built with Baileys (Node.js).
+Step 1: List the project structure quickly (skip node_modules), identify key files, then proceed with all changes directly.
+
+1. Title Decoration
+For every message title (adhkar, stories, quiz, daily content), apply Unicode decorative Arabic styling — similar to Arabic calligraphy/zakhrafah tools. Use characters from Unicode ranges like ﭐ ﮬ ࿐ ꧁ ꧂ combined with Islamic symbols like ☪ ✦ ۞ ﷽ ❁ to frame the title elegantly.
+Example style:
+࿐꧁ *🌅 أذْكَـارُ الصَّبَـاح* ꧂࿐
+Keep decoration minimal and tasteful — only on the title line, nothing else. The rest of the message stays clean.
+
+2. Morning/Evening Adhkar & Daily Content — Message Structure
+Find all adhkar and daily content. Restructure every message like this:
+
+Line 1: Decorated title only (this is the WhatsApp preview users see before tapping)
+Line 2: blank
+Line 3+: Full content in clean formatting using *bold* for key phrases, _italic_ for sources/narrators
+End with a short dua or reflection line
+
+
+3. Prophets' Stories & Islamic Stories
+Enrich story content with meaningful well-known stories (Musa & Khidr, Yusuf's patience, Uwais al-Qarni, etc). Structure:
+
+Decorated title as first line
+Short readable paragraphs
+Brief moral at the end
+
+
+4. Quiz Questions — Mixed Difficulty
+Replace questions with a varied difficulty mix:
+
+40% easy (basic pillars, famous surahs, well-known duas)
+40% medium (seerah details, surah context, common fiqh)
+20% harder (reasons of revelation, lesser-known facts)
+
+This keeps the quiz accessible for people new to learning about Islam.
+Each question must have:
+
+Arabic question text
+4 Arabic answer options
+Correct answer index
+Short explanation (2-3 lines) shown with the answer reveal
+
+
+5. Answer Reveal — Reply to Original Question
+When revealing the answer (after 1 hour), send it as a reply (quoted message) to the original question message using Baileys' quoted feature.
+
+6. Quiz System — Groups vs Channels
+
+Groups: collect text replies from users, track who answered correctly
+Channels (@newsletter JIDs): send question as formatted message, auto-reply with answer after 1 hour using quoted message
+
+
+7. Prayer Times
+Find prayer sending logic. Ensure:
+
+Each prayer sent exactly once at correct time
+On startup, skip prayers whose time already passed
+Persist last sent state in a JSON file to survive crashes
+
+
+8. WhatsApp Channels Support
+Add support for WhatsApp Channels alongside groups. JIDs ending in @newsletter should be treated as channels. Make targets configurable (array of group/channel JIDs).

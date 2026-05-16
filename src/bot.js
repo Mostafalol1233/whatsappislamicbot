@@ -3,13 +3,13 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import qrcode from 'qrcode-terminal';
 import { Sticker, StickerTypes } from 'wa-sticker-formatter';
-import { adminMenu, athkar, athkarCards, commandMenu, dailyCards, duas, formatAthkar, formatPrayerInfo, istighfarList, lastTenDuas, prayerNameArabic, dailyDuas, dailyTips, seriesAllahNames, seriesAshraMubashareen, seriesSeerah, triviaQuestions } from './content.js';
+import { adminMenu, athkar, athkarCards, commandMenu, dailyCards, duas, decorateTitle, formatAthkar, formatPrayerInfo, istighfarList, lastTenDuas, prayerNameArabic, dailyDuas, dailyTips, seriesAllahNames, seriesAshraMubashareen, seriesSeerah, triviaQuestions } from './content.js';
 import { getAfterPrayerAzkar, getEveningAzkar, getMorningAzkar } from './azkarApi.js';
 import { getPixabayImages, getRandomIslamicImage } from './imageApi.js';
 import { addTarget, getStore, getTarget, removeTarget, updateTarget, isEventSentToday, markEventSent } from './store.js';
 import { convertTo12Hour, formatPrayerTimes, getDailyJuzNumber, getNextPrayer, getPrayerTimes, isPrayerNow } from './prayer.js';
 import { getProphetsStory, getSeerahInfo, getQuranVerse, getFiqhIssue, getDhuAlHijjahReminder } from './dailyContentManager.js';
-import { startCompleteVerseGame, revealCompleteVerseAnswer, startWhoAmIGame, revealWhoAmIAnswer, checkGameAnswer, activeGames, startTriviaGame } from './gameManager.js';
+import { startCompleteVerseGame, revealCompleteVerseAnswer, startWhoAmIGame, revealWhoAmIAnswer, checkGameAnswer, activeGames, startTriviaGame, buildTriviaQuestionText, buildTriviaAnswerText, setQuestionMsgKey, getQuestionMsgKey } from './gameManager.js';
 import { addPoints, getLeaderboard } from './leaderboard.js';
 
 dotenv.config();
@@ -85,9 +85,30 @@ async function loadBaileysApi() {
   return baileysApi;
 }
 
+const isChannel = (jid) => typeof jid === 'string' && jid.endsWith('@newsletter');
+
 async function sendText(jid, text) {
-  if (!sock) return;
-  await sock.sendMessage(jid, { text });
+  if (!sock) return null;
+  try {
+    const result = await sock.sendMessage(jid, { text });
+    return result;
+  } catch (e) {
+    logger.error(`sendText error to ${jid}:`, e.message);
+    return null;
+  }
+}
+
+async function sendQuoted(jid, text, quotedMsgKey) {
+  if (!sock) return null;
+  try {
+    if (quotedMsgKey) {
+      const result = await sock.sendMessage(jid, { text }, { quoted: { key: quotedMsgKey, message: { conversation: '' } } });
+      return result;
+    }
+    return await sendText(jid, text);
+  } catch (e) {
+    return await sendText(jid, text);
+  }
 }
 
 async function broadcastTo(targets, text) {
@@ -130,9 +151,9 @@ async function notifyPrayerForTarget(target, prayerKey, time) {
   const displayTime = convertTo12Hour(time);
   
   const messages = [
-    `يا جماعة، حان الآن موعد أذان *${ar}* 🕌\nالوقت: *${displayTime}*\n\nلا تنسوا الدعاء في هذا الوقت المستجاب 🤲`,
-    `الله أكبر، أذن *${ar}* الآن 🕋\nالساعة: *${displayTime}*\n\nتقبل الله منا ومنكم صالح الأعمال 🌸`,
-    `حان وقت لقاء الله.. أذان *${ar}* الآن 🕌\nتوقيت: *${displayTime}*\n\nصلوا على النبي ﷺ واستعدوا للصلاة ✨`
+    `${decorateTitle('🕌', `أذان ${ar}`)}\n\n⏰ *${displayTime}*\n\n_حيّ على الصلاة، حيّ على الفلاح_\n🤲 لا تنسوا الدعاء بين الأذان والإقامة`,
+    `${decorateTitle('🕋', `حان وقت ${ar}`)}\n\n⏰ *${displayTime}*\n\n_"الصلاة خير من النوم"_ 🌅\n🌸 تقبل الله منا ومنكم صالح الأعمال`,
+    `${decorateTitle('✨', `وقت ${ar}`)}\n\n⏰ *${displayTime}*\n\n_"وأقم الصلاة لذكري"_ 🕌\n💚 صلّوا على النبي ﷺ واستعدوا لملاقاة الله`
   ];
   const text = messages[Math.floor(Math.random() * messages.length)];
   await sendText(target.id, text);
@@ -194,13 +215,13 @@ async function checkSolarAthkarAlerts() {
     
     if (!isEventSentToday(target.id, 'sunrise-athkar') && isPrayerNow(times.Sunrise, now)) {
       const list = await getMorningAzkar();
-      await sendText(target.id, `صباح الخير 🌸 الشمس طلعت، لا تنسوا أذكار الصباح عشان يومكم يكون كله بركة ✨\n\n${formatAthkar('أذكار الصباح', list)}`);
+      await sendText(target.id, formatAthkar('أذكار الصباح', list, '🌅'));
       markEventSent(target.id, 'sunrise-athkar');
     }
     
     if (!isEventSentToday(target.id, 'sunset-athkar') && isPrayerNow(times.Maghrib, now)) {
       const list = await getEveningAzkar();
-      await sendText(target.id, `مساء الخير والطاعة 🌇 الشمس غربت، وقت أذكار المساء.. تقبل الله طاعاتكم 🤲\n\n${formatAthkar('أذكار المساء', list)}`);
+      await sendText(target.id, formatAthkar('أذكار المساء', list, '🌇'));
       markEventSent(target.id, 'sunset-athkar');
     }
   }
@@ -285,7 +306,7 @@ async function sendDailyFiqh() {
 }
 
 async function sendThursdayReminder() {
-  const text = `🔔 *تذكير ليلة الجمعة* 🔔\n\nما تنسوش الليلة قراءة سورة الكهف 📖\nوكذلك الإكثار من الصلاة على النبي ﷺ 🌸\n\n"اللهم صل وسلم على نبينا محمد" ✨`;
+  const text = `${decorateTitle('🔔', 'ليلة الجمعة المباركة')}\n\n_ما تنسوا سنن هذه الليلة:_\n\n📖 قراءة سورة الكهف\n🌸 الإكثار من الصلاة على النبي ﷺ\n🤲 الدعاء فهذه الليلة مستجابة\n\n_"اللهم صلِّ وسلم وبارك على سيدنا محمد"_ ✨`;
   for (const t of getActiveTargets((x) => x.enableDaily || x.enableAthkar)) {
     if (isEventSentToday(t.id, 'thursday-reminder')) continue;
     await sendText(t.id, text);
@@ -294,7 +315,7 @@ async function sendThursdayReminder() {
 }
 
 async function sendFridaySalawat() {
-  const text = `🌸 *ليالي الجمعة* 🌸\n\nأكثروا من الصلاة على النبي ﷺ في هذه الليلة المباركة.\n\n"إن الله وملائكته يصلون على النبي يا أيها الذين آمنوا صلوا عليه وسلموا تسليما" ✨\n\nاللهم صل وسلم وبارك على نبينا محمد 🕌`;
+  const text = `${decorateTitle('🌸', 'صلوا على الحبيب ﷺ')}\n\n_"إن الله وملائكته يصلون على النبي، يا أيها الذين آمنوا صلوا عليه وسلموا تسليماً"_\n\n🤍 اللهم صلِّ وسلم وبارك على سيدنا محمد\n\n_أكثروا من الصلاة عليه في ليلة الجمعة_ 🕌`;
   for (const t of getActiveTargets((x) => x.enableDaily || x.enableAthkar)) {
     if (isEventSentToday(t.id, 'friday-salawat')) continue;
     await sendText(t.id, text);
@@ -318,7 +339,8 @@ async function sendCompleteVerseGame() {
     if (isEventSentToday(t.id, 'complete-verse-start')) continue;
     const text = startCompleteVerseGame(t.id, day - 1);
     if (text) {
-      await sendText(t.id, text);
+      const sentMsg = await sendText(t.id, text);
+      if (sentMsg?.key) setQuestionMsgKey(t.id, sentMsg.key);
       markEventSent(t.id, 'complete-verse-start');
     }
   }
@@ -327,9 +349,10 @@ async function sendCompleteVerseGame() {
 async function revealCompleteVerseGame() {
   for (const t of getActiveTargets((x) => x.enableChallenges)) {
     if (isEventSentToday(t.id, 'complete-verse-reveal')) continue;
+    const questionKey = getQuestionMsgKey(t.id);
     const text = revealCompleteVerseAnswer(t.id);
     if (text) {
-      await sendText(t.id, text);
+      await sendQuoted(t.id, text, questionKey);
       markEventSent(t.id, 'complete-verse-reveal');
     }
   }
@@ -341,7 +364,8 @@ async function sendWhoAmIGame() {
     if (isEventSentToday(t.id, 'who-am-i-start')) continue;
     const text = startWhoAmIGame(t.id, day - 1);
     if (text) {
-      await sendText(t.id, text);
+      const sentMsg = await sendText(t.id, text);
+      if (sentMsg?.key) setQuestionMsgKey(t.id, sentMsg.key);
       markEventSent(t.id, 'who-am-i-start');
     }
   }
@@ -350,9 +374,10 @@ async function sendWhoAmIGame() {
 async function revealWhoAmIGame() {
   for (const t of getActiveTargets((x) => x.enableChallenges)) {
     if (isEventSentToday(t.id, 'who-am-i-reveal')) continue;
+    const questionKey = getQuestionMsgKey(t.id);
     const text = revealWhoAmIAnswer(t.id);
     if (text) {
-      await sendText(t.id, text);
+      await sendQuoted(t.id, text, questionKey);
       markEventSent(t.id, 'who-am-i-reveal');
     }
   }
@@ -367,12 +392,12 @@ async function sendDailyCard() {
   
   const tip = dailyTips.length ? dailyTips[(day - 1) % dailyTips.length] : '';
   
-  const messages = [
-    `يوم جديد من الأيام المباركة 🌙.. اليوم *${day}*\n\n*${card.title}*\n${card.text}\n\n💡 نصيحة سريعة: ${tip} 🌸`,
-    `صباح الخير في اليوم *${day}* 🌙\n\n*${card.title}*\n${card.text}\n\n💡 خذ بهذه النصيحة: ${tip} ✨`,
-    `تقبل الله طاعاتكم في اليوم *${day}* 🌙\n\n*${card.title}*\n${card.text}\n\n💡 نصيحة اليوم: ${tip} 🌸`
+  const cardMessages = [
+    `${decorateTitle('🌙', card.title)}\n\n${card.text}\n\n💡 _${tip}_`,
+    `${decorateTitle('✨', card.title)}\n\n${card.text}\n\n💡 _نصيحة اليوم: ${tip}_`,
+    `${decorateTitle('🌸', card.title)}\n\n${card.text}\n\n💡 _${tip}_`
   ];
-  const caption = messages[Math.floor(Math.random() * messages.length)];
+  const caption = cardMessages[Math.floor(Math.random() * cardMessages.length)];
   
   const autoImageUrl = await getRandomIslamicImage();
   for (const t of targets) {
@@ -393,10 +418,10 @@ async function sendDailySeries() {
   const seerah = seriesSeerah.length ? seriesSeerah[(day - 1) % seriesSeerah.length] : null;
   if (!name && !ashra && !seerah) return;
 
-  let text = `معلومات دينية جميلة ليومنا ده (اليوم *${day}*) 🌙✨\n━━━━━━━━━━━━━━━━━━\n\n`;
-  if (name) text += `🔹 *من أسماء الله الحُسنى:* ${name.name}\n*المعنى:* ${name.meaning}\n*دعاء:* ${name.dua}\n\n`;
-  if (ashra) text += `🌟 *من العشرة المبشرين بالجنة:* ${ashra.title}\n${ashra.text}\n\n`;
-  if (seerah) text += `📖 *من السيرة النبوية:* ${seerah.title}\n${seerah.text}\n`;
+  let text = `${decorateTitle('📚', 'معلومات دينية اليوم')}\n\n`;
+  if (name) text += `☪️ *اسم الله الحُسنى:* *${name.name}*\n_${name.meaning}_\n🤲 ${name.dua}\n\n`;
+  if (ashra) text += `🌟 *${ashra.title}*\n${ashra.text}\n\n`;
+  if (seerah) text += `📖 *${seerah.title}*\n_${seerah.text}_\n`;
   
   for (const t of targets) {
     if (isEventSentToday(t.id, 'daily-series')) continue;
@@ -410,12 +435,7 @@ async function sendSalawatReminder() {
   if (!targets.length) return;
   const counts = [10, 33, 50, 100];
   const n = counts[Math.floor(Math.random() * counts.length)];
-  const messages = [
-    `يا جماعة، إيه رأيكم نصلي على النبي ﷺ انهارده؟ 🌸\nاللهم صل وسلم على نبينا محمد.. هدفنا انهارده *${n}* مرة ✨`,
-    `اللهم صل وسلم على نبينا محمد 🌸.. ما تنسوش تعطروا ألسنتكم بالصلاة عليه انهارده، خلونا نوصل لـ *${n}* صلاة ✨`,
-    `يومكم جميل بالصلاة على الحبيب ﷺ 🌸.. خلونا انهارده نكثر منها، هدفنا *${n}* مرة 🕌`
-  ];
-  const text = messages[Math.floor(Math.random() * messages.length)];
+  const text = `${decorateTitle('🌸', 'الصلاة على النبي ﷺ')}\n\n_"إن الله وملائكته يصلون على النبي يا أيها الذين آمنوا صلوا عليه وسلموا تسليماً"_\n\n💚 هدفنا اليوم: *${n}* صلاة على النبي ﷺ\n\n🤍 اللهم صلِّ وسلم وبارك على سيدنا محمد`;
   for (const t of targets) {
     if (isEventSentToday(t.id, 'salawat-reminder')) continue;
     await sendText(t.id, text);
@@ -426,15 +446,10 @@ async function sendSalawatReminder() {
 async function sendWitrReminder() {
   const targets = getActiveTargets((t) => t.enablePrayer);
   if (!targets.length) return;
-  const messages = [
-    `قبل ما تناموا، لا تنسوا صلاة الوتر 🌙.. هي نور ليلتكم، "اجعلوا آخر صلاتكم بالليل وتراً" ✨`,
-    `ختام يومكم ركعة وتر 🌙.. لا تضيعوا فضلها قبل النوم، تقبل الله منكم 🤲`,
-    `يا شباب، الوتر جنة القلوب 🌙.. ركعة واحدة تكفي لختام يومكم بالخير ✨`
-  ];
-  const text = messages[Math.floor(Math.random() * messages.length)];
+  const witrText = `${decorateTitle('🌙', 'تذكير الوتر')}\n\n_"اجعلوا آخر صلاتكم بالليل وِتراً"_ ﷺ\n\nقبل النوم، ختم يومك بركعة وتر\n🤲 _تقبل الله منا ومنكم_`;
   for (const t of targets) {
     if (isEventSentToday(t.id, 'witr-reminder')) continue;
-    await sendText(t.id, text);
+    await sendText(t.id, witrText);
     markEventSent(t.id, 'witr-reminder');
   }
 }
@@ -442,12 +457,7 @@ async function sendWitrReminder() {
 async function sendCharityReminder() {
   const targets = getActiveTargets((t) => t.enableDaily);
   if (!targets.length) return;
-  const messages = [
-    `حاجة بسيطة ممكن تفرق كتير.. إيه رأيكم نتصدق انهارده ولو بشيء قليل؟ 💝 الصدقة بركة في العمر والمال ✨`,
-    `الصدقة تطفئ غضب الرب 💝.. لا تنسوا نصيبكم من الخير انهارده، ولو بمساعدة محتاج أو مبلغ بسيط لجهة موثوقة ✨`,
-    `تصدقوا ولو بشق تمرة 💝.. يومكم كله بركة لما تبدأوه بالصدقة والإحسان 🌸`
-  ];
-  const text = messages[Math.floor(Math.random() * messages.length)];
+  const text = `${decorateTitle('💝', 'تذكير الصدقة')}\n\n_"الصدقة تطفئ الخطيئة كما يطفئ الماء النار"_ ﷺ\n\n💡 تصدّق اليوم ولو بشيء صغير\n🌸 _الصدقة بركة في العمر والرزق_`;
   for (const t of targets) {
     if (isEventSentToday(t.id, 'charity-reminder')) continue;
     await sendText(t.id, text);
@@ -475,9 +485,8 @@ async function sendDailyQuestion() {
     if (isEventSentToday(t.id, 'daily-question-start')) continue;
     
     let indices = t.sentQuestionIndices || [];
-    if (indices.length >= triviaQuestions.length) indices = []; // Reset if all questions used
+    if (indices.length >= triviaQuestions.length) indices = [];
     
-    // Find a random index not in indices
     let qIdx;
     const available = triviaQuestions.map((_, i) => i).filter(i => !indices.includes(i));
     if (available.length === 0) {
@@ -492,14 +501,9 @@ async function sendDailyQuestion() {
     const q = triviaQuestions[qIdx];
     startTriviaGame(t.id, q);
     
-    const optionsText = q.options.map((opt, i) => `${i + 1}) ${opt}`).join('\n');
-    const messages = [
-      `✨ *مسابقة دينية سريعة* 🤔✨\n\n*${q.question}*\n\n${optionsText}\n\nفكروا في الإجابة، وبعد ساعة هبعت لكم الرد الصحيح مع شرح بسيط 🌸`,
-      `إيه رأيكم نختبر معلوماتنا الدينية؟ 🤔✨\n\n*${q.question}*\n\n${optionsText}\n\nالإجابة والشرح بعد ساعة بالظبط إن شاء الله 🌸`,
-      `سؤال اليوم الديني 🤔✨\n\n*${q.question}*\n\n${optionsText}\n\nهنتظر ساعة وهنزل الإجابة الصحيحة 🌸`
-    ];
-    const text = messages[Math.floor(Math.random() * messages.length)];
-    await sendText(t.id, text);
+    const text = buildTriviaQuestionText(q);
+    const sentMsg = await sendText(t.id, text);
+    if (sentMsg?.key) setQuestionMsgKey(t.id, sentMsg.key);
     markEventSent(t.id, 'daily-question-start');
   }
 }
@@ -511,19 +515,17 @@ async function sendDailyAnswer() {
   for (const t of allTargets) {
     if (isEventSentToday(t.id, 'daily-question-reveal')) continue;
     
+    const game = activeGames.get(t.id);
+    const questionKey = getQuestionMsgKey(t.id);
     activeGames.delete(t.id);
     const indices = t.sentQuestionIndices || [];
     if (indices.length === 0) continue;
     const qIdx = indices[indices.length - 1];
     const q = triviaQuestions[qIdx];
     
-    const messages = [
-      `مرت ساعة، ودي إجابة سؤالنا انهارده ✅✨\n\nالسؤال كان: *${q.question}*\nالإجابة الصح هي: *${q.answer}*\n\n*شرح بسيط:* ${q.explanation} 🌸`,
-      `الإجابة الصحيحة لسؤال اليوم ✅✨\n\n*${q.answer}*\n\n*بإيجاز:* ${q.explanation} 🌸`,
-      `خلص الوقت، والحل هو: *${q.answer}* ✅✨\n\n*للفائدة:* ${q.explanation} 🌸`
-    ];
-    const text = messages[Math.floor(Math.random() * messages.length)];
-    await sendText(t.id, text);
+    if (!q) { markEventSent(t.id, 'daily-question-reveal'); continue; }
+    const text = buildTriviaAnswerText(q);
+    await sendQuoted(t.id, text, questionKey);
     markEventSent(t.id, 'daily-question-reveal');
   }
 }
@@ -533,7 +535,7 @@ async function sendFridayContent() {
   if (now.getDay() !== 5) return;
   const targets = getActiveTargets((t) => t.enableDaily || t.enablePrayer || t.enableAthkar);
   if (!targets.length) return;
-  const text = 'جمعة مباركة يا شباب 🌿✨\n\nما تنسوش سنن اليوم:\n- الإكثار من الصلاة على النبي ﷺ 🌸\n- قراءة سورة الكهف 📖\n- تحري ساعة الإجابة 🤲\n\nاللهم صل وسلم على نبينا محمد ✨';
+  const text = `${decorateTitle('🌿', 'جمعة مباركة')}\n\n*سنن هذا اليوم المبارك:*\n\n🌸 الإكثار من الصلاة على النبي ﷺ\n📖 قراءة سورة الكهف\n🤲 تحري ساعة الإجابة بعد العصر\n☀️ الاغتسال والتطيب\n\n_"اللهم صلِّ وسلم وبارك على سيدنا محمد"_ ✨`;
   for (const t of targets) {
     if (isEventSentToday(t.id, 'friday-content')) continue;
     await sendText(t.id, text);
@@ -547,7 +549,7 @@ async function sendNightlyDuas() {
   if (!targets.length) return;
   const idx = (day - 1) % lastTenDuas.length;
   const dua = lastTenDuas[idx];
-  let text = `دعاء ليلة اليوم (اليوم *${day}*) 🌙✨\n\n🤲 *دعاء الليلة:*\n${dua}\n\nتقبل الله منا ومنكم 🌸🌙`;
+  let text = `${decorateTitle('🌙', 'دعاء الليلة')}\n\n🤲 ${dua}\n\n_تقبل الله منا ومنكم_ 🌸`;
   for (const t of targets) {
     if (isEventSentToday(t.id, 'nightly-dua')) continue;
     await sendText(t.id, text);
@@ -793,8 +795,9 @@ async function handleServicesCommand(jid, body, msg) {
   }
   if (body === '.ملفات') return sendText(jid, '📁 *ملفات الصوت المتاحة*\n• 019--1.mp3 (أذان عام)\n• 052-.mp3 (أذان الفجر والمغرب)\n• 046--_up_by_muslem.mp3 (دعاء بعد العشاء)\n\nللطلب:\n• *.ملف019* : إرسال ملف 019--1.mp3\n• *.ملف052* : إرسال ملف 052-.mp3\n• *.ملف046* : إرسال ملف 046--_up_by_muslem.mp3');
   if (body === '.ابدأ') {
-    if (!getTarget(jid)) addTarget(jid, 'Direct Chat', config.city, config.country);
-    return sendText(jid, '✅ تم تهيئة الدردشة. استخدم .حالة و .مدينة|City|Country ثم .اوامر');
+    const targetName = isChannel(jid) ? 'Channel' : jid.endsWith('@g.us') ? 'Group' : 'Direct Chat';
+    if (!getTarget(jid)) addTarget(jid, targetName, config.city, config.country);
+    return sendText(jid, `✅ تم تفعيل البوت بنجاح${isChannel(jid) ? ' للقناة' : ''}!\n\nاستخدم *.قايمه* لعرض جميع الخدمات 🌸`);
   }
   if (body === '.ورد') {
     const juz = getDailyJuzNumber(new Date(), config.botStartDate);
@@ -1146,7 +1149,7 @@ export async function startBot() {
     await checkSolarAthkarAlerts();
   }, { timezone: config.timezone });
   cron.schedule('0 * * * *', async () => sock && sendHourlyAthkar(), { timezone: config.timezone });
-  cron.schedule(toCron(config.nightlyAzkarTime), async () => sock && broadcastTo(getActiveTargets((t) => t.enableAthkar), formatAthkar('أذكار المساء', athkar.evening)), { timezone: config.timezone });
+  cron.schedule(toCron(config.nightlyAzkarTime), async () => sock && broadcastTo(getActiveTargets((t) => t.enableAthkar), formatAthkar('أذكار المساء', athkar.evening, '🌇')), { timezone: config.timezone });
   cron.schedule(toCron(config.quranPdfTime), async () => sock && sendQuranPdf(), { timezone: config.timezone });
   cron.schedule(toCron(config.dailyJuzTime), async () => sock && sendDailyJuz(), { timezone: config.timezone });
   cron.schedule('30 15 * * *', async () => sock && sendDailyDua(), { timezone: config.timezone });

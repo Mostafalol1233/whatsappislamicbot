@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { decorateTitle } from './content.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,47 +36,70 @@ export const getDayIndex = (startDateStr) => {
 export const getProphetsStory = (dayIndex) => {
   if (!prophetsStories.length) return null;
   const story = prophetsStories[dayIndex % prophetsStories.length];
-  return `📚 *قصص الأنبياء — ${story.episode}* 📚\n\n✨ *${story.title}*\n\n📖 ${story.content}\n\n💡 *الحكمة والعبرة:*\n${story.lesson}\n\n#قصص_الأنبياء #محتوى_يومي`;
+  return `${decorateTitle('📚', `قصص الأنبياء — ${story.episode}`)}\n\n` +
+    `✨ *${story.title}*\n\n` +
+    `${story.content}\n\n` +
+    `💡 *العبرة والحكمة:*\n_${story.lesson}_\n\n` +
+    `🤲 _اللهم اجعلنا ممن يتعلم من سير الأنبياء ويقتدي بهم_`;
 };
 
 export const getSeerahInfo = (dayIndex) => {
   if (!seerahData.length) return null;
   const info = seerahData[dayIndex % seerahData.length];
-  return `📜 *معلومة من السيرة النبوية* 📜\n\n📅 *التاريخ:* ${info.date}\n📍 *الحدث:* ${info.event}\n\n📖 ${info.info}\n\n📚 *المصدر:* ${info.source}\n\n#السيرة_النبوية #يوم_بيوم`;
+  return `${decorateTitle('📜', 'من السيرة النبوية الشريفة')}\n\n` +
+    `📅 *${info.date}*\n` +
+    `📍 *${info.event}*\n\n` +
+    `${info.info}\n\n` +
+    `_المصدر: ${info.source}_\n\n` +
+    `🤲 _اللهم صلِّ وسلم وبارك على سيدنا محمد ﷺ_`;
 };
 
 export const getQuranVerse = (dayIndex) => {
   if (!quranVerseData.length) return null;
   const item = quranVerseData[dayIndex % quranVerseData.length];
-  return `📖 *آية وتفسير* 📖\n\n✨ ${item.verse}\n📍 *${item.surah}*\n\n📝 *التفسير المبسط:*\n${item.interpretation}\n\n🔍 *معاني الكلمات:*\n${item.meanings}\n\n#قرآن #آية_وتفسير`;
+  return `${decorateTitle('📖', 'آية وتفسير')}\n\n` +
+    `*${item.verse}*\n` +
+    `_${item.surah}_\n\n` +
+    `📝 *التفسير:*\n${item.interpretation}\n\n` +
+    `🔍 *معاني الكلمات:*\n_${item.meanings}_\n\n` +
+    `🤲 _اللهم اجعل القرآن ربيع قلوبنا ونور صدورنا_`;
 };
 
 export const getFiqhIssue = (dayIndex) => {
   if (!fiqhData.length) return null;
   const item = fiqhData[dayIndex % fiqhData.length];
-  return `⚖️ *فقه سريع* ⚖️\n\n❓ *المسألة:* ${item.issue}\n\n✅ *الحكم:* ${item.ruling}\n\n📖 *الدليل:* ${item.evidence}\n\n#فقه #مسألة_فقهية`;
+  return `${decorateTitle('⚖️', 'فقه سريع')}\n\n` +
+    `❓ *المسألة:*\n${item.issue}\n\n` +
+    `✅ *الحكم:* ${item.ruling}\n\n` +
+    `📖 *الدليل:*\n_${item.evidence}_\n\n` +
+    `💡 _علم الفقه نور يضيء طريق المؤمن_`;
 };
 
 export const isThursdayNight = () => {
   const now = new Date();
-  return now.getDay() === 4 && now.getHours() >= 18; // Thursday evening
+  return now.getDay() === 4 && now.getHours() >= 18;
 };
 
 export const isFridayNight = () => {
   const now = new Date();
-  return now.getDay() === 4 && now.getHours() >= 18; // Technically Friday starts at sunset Thursday
+  return now.getDay() === 4 && now.getHours() >= 18;
 };
 
 export const getDhuAlHijjahReminder = () => {
-  // This would normally use a Hijri library, but we can mock it or check dates for 2026
-  // In 2026, 1 Dhu al-Hijjah is approximately May 17
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
   const day = now.getDate();
 
   if (year === 2026 && month === 5 && day >= 17 && day <= 26) {
-    return `✨ *تنبيه: دخلت العشر الأوائل من ذي الحجة* ✨\n\nقال ﷺ: "ما من أيام العمل الصالح فيها أحب إلى الله من هذه الأيام".\n\n💡 *أهم الأعمال:* \n1️⃣ الصيام (خاصة يوم عرفة)\n2️⃣ الإكثار من التحميد والتهليل والتكبير\n3️⃣ الصدقة وصلة الأرحام\n4️⃣ قراءة القرآن\n\nاغتنموا هذه الأيام المباركة! 🌸`;
+    return `${decorateTitle('🌙', 'العشر الأوائل من ذي الحجة')}\n\n` +
+      `قال ﷺ: _"ما من أيام العمل الصالح فيها أحب إلى الله من هذه الأيام"_\n\n` +
+      `*أبرز الأعمال في هذه الأيام:*\n` +
+      `1️⃣ الصيام — خاصة يوم عرفة\n` +
+      `2️⃣ التكبير والتهليل والتحميد\n` +
+      `3️⃣ الصدقة وصلة الأرحام\n` +
+      `4️⃣ قراءة القرآن بتدبر\n\n` +
+      `🤲 _اغتنموا هذه الأيام المباركة قبل أن تنقضي_`;
   }
   return null;
 };
