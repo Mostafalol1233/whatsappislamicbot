@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { decorateTitle } from './content.js';
+import { DECO } from './content.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,10 +33,11 @@ export const getDayIndex = (startDateStr) => {
   return diffDays;
 };
 
+// Fix 4 & 6: each content type uses its own DECO style; frame only on title line
 export const getProphetsStory = (dayIndex) => {
   if (!prophetsStories.length) return null;
   const story = prophetsStories[dayIndex % prophetsStories.length];
-  return `${decorateTitle('📚', `قصص الأنبياء — ${story.episode}`)}\n\n` +
+  return `${DECO.STORY(`📚 قصص الأنبياء — ${story.episode}`)}\n\n` +
     `✨ *${story.title}*\n\n` +
     `${story.content}\n\n` +
     `💡 *العبرة والحكمة:*\n_${story.lesson}_\n\n` +
@@ -46,7 +47,7 @@ export const getProphetsStory = (dayIndex) => {
 export const getSeerahInfo = (dayIndex) => {
   if (!seerahData.length) return null;
   const info = seerahData[dayIndex % seerahData.length];
-  return `${decorateTitle('📜', 'من السيرة النبوية الشريفة')}\n\n` +
+  return `${DECO.SEERAH('📜 من السيرة النبوية الشريفة')}\n\n` +
     `📅 *${info.date}*\n` +
     `📍 *${info.event}*\n\n` +
     `${info.info}\n\n` +
@@ -57,7 +58,7 @@ export const getSeerahInfo = (dayIndex) => {
 export const getQuranVerse = (dayIndex) => {
   if (!quranVerseData.length) return null;
   const item = quranVerseData[dayIndex % quranVerseData.length];
-  return `${decorateTitle('📖', 'آية وتفسير')}\n\n` +
+  return `${DECO.QURAN('📖 آية وتفسير')}\n\n` +
     `*${item.verse}*\n` +
     `_${item.surah}_\n\n` +
     `📝 *التفسير:*\n${item.interpretation}\n\n` +
@@ -68,7 +69,7 @@ export const getQuranVerse = (dayIndex) => {
 export const getFiqhIssue = (dayIndex) => {
   if (!fiqhData.length) return null;
   const item = fiqhData[dayIndex % fiqhData.length];
-  return `${decorateTitle('⚖️', 'فقه سريع')}\n\n` +
+  return `${DECO.FIQH('⚖️ فقه سريع')}\n\n` +
     `❓ *المسألة:*\n${item.issue}\n\n` +
     `✅ *الحكم:* ${item.ruling}\n\n` +
     `📖 *الدليل:*\n_${item.evidence}_\n\n` +
@@ -85,21 +86,5 @@ export const isFridayNight = () => {
   return now.getDay() === 4 && now.getHours() >= 18;
 };
 
-export const getDhuAlHijjahReminder = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
-
-  if (year === 2026 && month === 5 && day >= 17 && day <= 26) {
-    return `${decorateTitle('🌙', 'العشر الأوائل من ذي الحجة')}\n\n` +
-      `قال ﷺ: _"ما من أيام العمل الصالح فيها أحب إلى الله من هذه الأيام"_\n\n` +
-      `*أبرز الأعمال في هذه الأيام:*\n` +
-      `1️⃣ الصيام — خاصة يوم عرفة\n` +
-      `2️⃣ التكبير والتهليل والتحميد\n` +
-      `3️⃣ الصدقة وصلة الأرحام\n` +
-      `4️⃣ قراءة القرآن بتدبر\n\n` +
-      `🤲 _اغتنموا هذه الأيام المباركة قبل أن تنقضي_`;
-  }
-  return null;
-};
+// Legacy stub — real Dhul Hijjah logic is now in src/dhulHijjah.js
+export const getDhuAlHijjahReminder = () => null;

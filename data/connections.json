@@ -1,3 +1,20 @@
 {
-  "targets": []
+  "targets": [
+    {
+      "id": "120363419256968073@g.us",
+      "name": "Group",
+      "city": "مصر",
+      "country": "Egypt",
+      "isActive": true,
+      "enablePrayer": true,
+      "enableAthkar": true,
+      "enableQuran": true,
+      "enableDaily": true,
+      "enableChallenges": true,
+      "enableHourlyAthkar": true,
+      "sentQuestionIndices": [],
+      "sentLog": {},
+      "createdAt": "2026-05-16T10:27:30.721Z"
+    }
+  ]
 }

@@ -1,0 +1,47 @@
+Fix 6: Decoration Variety — Different styles per message type
+Do NOT use the same frame (࿐꧁ ꧂࿐) for every message. Use a variety of Unicode decoration styles, one style per content category. Examples to use and mix:
+❁ ══════════════ ❁
+✦•┈┈┈•✦•┈┈┈•✦
+▬▬▬▬▬▬▬▬▬▬
+━━━━━━━━━━━━━
+﷽ ─────────── ﷽  
+۞ ════════ ۞
+☪ •·········•·········• ☪
+✧·͜·✦·͜·✧
+⊱ ──────── ⊰
+🌙 ─╌╌╌╌╌╌╌╌╌╌╌─ 🌙
+Assign a consistent style to each content type (adhkar gets one style, stories get another, quiz gets another, etc). Apply decoration ONLY to the title line.
+
+Fix 7: Daily Wird (ورد) — Send as PDF via API
+The current wird is spamming multiple messages. Replace entirely with this approach:
+
+Use the Al Quran Cloud API (https://api.alquran.cloud/v1/juz/{juzNumber}/ar.alafasy) to get today's juz based on day of year or a rotating counter stored in a JSON file
+Convert the juz text into a clean PDF file (use pdfkit npm package)
+Style the PDF: white background, Arabic font (embed a basic Arabic font or use Unicode), right-to-left, clean layout with surah names as headers
+Send the PDF as a document message via Baileys (mimetype: 'application/pdf')
+Send only ONE message per day — the PDF
+
+
+Fix 8: First 10 Days of Dhul Hijjah — Special Content Block
+Add a scheduled content block that activates during the first 10 days of Dhul Hijjah (detect via Hijri date using hijri-date or moment-hijri npm package).
+Send in this order with ~30 min gaps:
+1. Opening Image
+Fetch a clean Islamic calendar image for Dhul Hijjah from a reliable source (try Unsplash Islamic search or a static URL). Send it with a caption showing today's Hijri and Gregorian date, and whether today is a recommended fasting day (days 1–9 are recommended, day 10 is Eid — no fasting).
+2. Virtues Message
+Send a formatted message with the fadl (فضل) of these 10 days — reference hadith from Bukhari about these being the best days, mention what deeds are multiplied. Use decorated title style.
+3. Fasting Reminder
+If today is day 1–8: send a fasting reminder for tomorrow
+If today is day 9 (Arafah): send a special message about the virtue of fasting Arafah and that it expiates 2 years of sins
+If today is day 10: send Eid Mubarak message instead
+4. Iftar Reminder
+On fasting days, send an iftar reminder at Maghrib prayer time (hook into the existing prayer time logic)
+5. Special Daily Content
+Each of the 10 days gets unique content — e.g.:
+
+Day 1: Takbeer reminder (الله أكبر الله أكبر لا إله إلا الله...)
+Day 3: Story of Ibrahim and the sacrifice
+Day 7: Reminder about Udhiyah (الأضحية) and its rulings
+Day 9: Extended Arafah duas and dhikr
+Day 10: Eid prayer times reminder + Eid duas
+
+Store which day's content was sent in the persistent JSON state file to avoid resending after crashes.

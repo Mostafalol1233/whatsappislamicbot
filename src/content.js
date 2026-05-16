@@ -350,15 +350,46 @@ export const prayerNameArabic = Object.fromEntries(
   Object.entries(prayerRakaatInfo).map(([k, v]) => [k, v.arabic])
 );
 
+// ── Decoration styles ─────────────────────────────────────────
+export const DECO = {
+  MORNING:   (t) => `❁══ *${t}* ══❁`,
+  EVENING:   (t) => `🌙─╌ *${t}* ╌─🌙`,
+  PRAYER:    (t) => `۞══ *${t}* ══۞`,
+  QUIZ:      (t) => `✦•┈ *${t}* ┈•✦`,
+  ANSWER:    (t) => `✅══ *${t}* ══✅`,
+  STORY:     (t) => `☪·· *${t}* ··☪`,
+  SEERAH:    (t) => `⊱── *${t}* ──⊰`,
+  QURAN:     (t) => `﷽── *${t}* ──﷽`,
+  FIQH:      (t) => `━━ *${t}* ━━`,
+  SERIES:    (t) => `✧·✦ *${t}* ✦·✧`,
+  HADITH:    (t) => `☪── *${t}* ──☪`,
+  JUZ:       (t) => `📖── *${t}* ──📖`,
+  CARD:      (t) => `❁ *${t}* ❁`,
+  NIGHTLY:   (t) => `🌙·· *${t}* ··🌙`,
+  CHARITY:   (t) => `💝── *${t}* ──💝`,
+  WITR:      (t) => `🌙── *${t}* ──🌙`,
+  SALAWAT:   (t) => `🌸── *${t}* ──🌸`,
+  FRIDAY:    (t) => `🌿── *${t}* ──🌿`,
+  THURSDAY:  (t) => `🔔── *${t}* ──🔔`,
+  GAME_VERSE:(t) => `⊱── *${t}* ──⊰`,
+  GAME_WHO:  (t) => `✦·· *${t}* ··✦`,
+  DHU_HIJJAH:(t) => `﷽──── *${t}* ────﷽`,
+};
+
+// Keep legacy helper for callers that haven't migrated yet
 export function decorateTitle(emoji, title) {
-  return `࿐꧁ *${emoji} ${title}* ꧂࿐`;
+  return `❁══ *${emoji} ${title}* ══❁`;
 }
 
-export function formatAthkar(title, list, emoji = '✨') {
-  const decorated = decorateTitle(emoji, title);
-  return `${decorated}\n\n` +
-    list.map((a, i) => `*${i + 1}.* ${a.text}${a.count > 1 ? `\n_تُقال ${a.count} مرات_` : ''}`).join('\n\n') +
-    '\n\n🤲 _اللهم اجعلنا من الذاكرين الشاكرين_';
+// Fix 1 & 2: title alone on line 1 → blank line → items with ×N counts
+export function formatAthkar(title, list, decoFnOrEmoji = DECO.MORNING) {
+  const deco = typeof decoFnOrEmoji === 'function' ? decoFnOrEmoji : DECO.MORNING;
+  const header = deco(title);
+  const items = list.map((a, i) => {
+    const countStr = a.count > 1 ? ` 🌿 ×${a.count}` : '';
+    return `*${i + 1}.* ${a.text}${countStr}`;
+  }).join('\n\n');
+  return `${header}\n\n${items}\n\n🤲 _اللهم اجعلنا من الذاكرين الشاكرين_`;
 }
 
 export function formatPrayerInfo(prayerKey) {

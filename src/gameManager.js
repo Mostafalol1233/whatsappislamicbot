@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { decorateTitle } from './content.js';
+import { DECO } from './content.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +22,8 @@ const loadJson = (filename) => {
 const gamesData = loadJson('games.json') || { complete_verse: [], who_am_i: [] };
 
 export const activeGames = new Map();
+
+// In-memory fallback; real persistence is via store.saveQuestionKey
 export const questionMsgKeys = new Map();
 
 export const setQuestionMsgKey = (chatJid, msgKey) => {
@@ -42,10 +44,11 @@ export const startTriviaGame = (chatJid, questionData) => {
   activeGames.set(chatJid, { type: 'trivia', data: questionData, startTime: Date.now() });
 };
 
+// Fix 4 & 6: DECO.QUIZ on title line only; body is plain
 export const buildTriviaQuestionText = (q) => {
   const optionsText = q.options.map((opt, i) => `  *${i + 1}.* ${opt}`).join('\n');
   const diff = difficultyLabel(q.difficulty || 'easy');
-  return `${decorateTitle('🤔', 'سؤال ديني اليوم')}\n\n` +
+  return `${DECO.QUIZ('🤔 سؤال ديني اليوم')}\n\n` +
     `${diff}\n\n` +
     `*${q.question}*\n\n` +
     `${optionsText}\n\n` +
@@ -54,7 +57,7 @@ export const buildTriviaQuestionText = (q) => {
 
 export const buildTriviaAnswerText = (q) => {
   const correctIdx = q.options.findIndex(opt => opt === q.answer);
-  return `${decorateTitle('✅', 'الإجابة الصحيحة')}\n\n` +
+  return `${DECO.ANSWER('الإجابة الصحيحة')}\n\n` +
     `*${correctIdx + 1}. ${q.answer}* ✔️\n\n` +
     `📖 *الشرح:*\n_${q.explanation}_\n\n` +
     `🌸 _بارك الله فيكم جميعًا_`;
@@ -64,7 +67,7 @@ export const startCompleteVerseGame = (chatJid, dayIndex) => {
   if (!gamesData.complete_verse.length) return null;
   const game = gamesData.complete_verse[dayIndex % gamesData.complete_verse.length];
   activeGames.set(chatJid, { type: 'complete_verse', data: game, startTime: Date.now() });
-  return `${decorateTitle('📖', 'أكمل الآية الكريمة')}\n\n` +
+  return `${DECO.GAME_VERSE('📖 أكمل الآية الكريمة')}\n\n` +
     `*${game.partial_verse}*\n\n` +
     `✍️ _أكمل الآية في التعليقات_\n` +
     `⏳ _الإجابة بعد ساعة إن شاء الله_ 🌸`;
@@ -74,7 +77,7 @@ export const revealCompleteVerseAnswer = (chatJid) => {
   const game = activeGames.get(chatJid);
   if (!game || game.type !== 'complete_verse') return null;
   activeGames.delete(chatJid);
-  return `${decorateTitle('✅', 'الإجابة الصحيحة')}\n\n` +
+  return `${DECO.ANSWER('الإجابة الصحيحة')}\n\n` +
     `📖 *${game.data.full_verse}*\n` +
     `_${game.data.surah}_\n\n` +
     `🌸 _بارك الله فيكم ونفعنا وإياكم بكتابه_`;
@@ -84,7 +87,7 @@ export const startWhoAmIGame = (chatJid, dayIndex) => {
   if (!gamesData.who_am_i.length) return null;
   const game = gamesData.who_am_i[dayIndex % gamesData.who_am_i.length];
   activeGames.set(chatJid, { type: 'who_am_i', data: game, startTime: Date.now() });
-  return `${decorateTitle('🕵️', 'من أنا؟')}\n\n` +
+  return `${DECO.GAME_WHO('🕵️ من أنا؟')}\n\n` +
     `🔍 *الوصف:*\n${game.description}\n\n` +
     `✍️ _خمّن اسم الشخصية الإسلامية في التعليقات_\n` +
     `⏳ _الإجابة بعد ساعة إن شاء الله_ 🌸`;
@@ -94,7 +97,7 @@ export const revealWhoAmIAnswer = (chatJid) => {
   const game = activeGames.get(chatJid);
   if (!game || game.type !== 'who_am_i') return null;
   activeGames.delete(chatJid);
-  return `${decorateTitle('✅', 'الإجابة الصحيحة')}\n\n` +
+  return `${DECO.ANSWER('الإجابة الصحيحة')}\n\n` +
     `👤 _الشخصية هي:_ *${game.data.answer}*\n\n` +
     `🌸 _بارك الله فيكم ونفعنا بسير صالحيه_`;
 };

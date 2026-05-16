@@ -92,3 +92,12 @@ export function isEventSentToday(targetId, eventKey) {
   const today = new Date().toISOString().split('T')[0];
   return target.sentLog.date === today && target.sentLog.events.includes(eventKey);
 }
+
+// Fix 5: persist question message key so quoted-reply works across restarts
+export function saveQuestionKey(targetId, msgKey) {
+  if (msgKey) updateTarget(targetId, { lastQuestionMsgKey: msgKey });
+}
+
+export function loadQuestionKey(targetId) {
+  return getTarget(targetId)?.lastQuestionMsgKey || null;
+}
